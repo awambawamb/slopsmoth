@@ -201,6 +201,7 @@ Routes are registered under `/api/plugins/{plugin_id}/` to avoid conflicts.
 | [Fretboard View](https://github.com/byrongamatos/slopsmith-plugin-fretboard) | Live fretboard overlay showing active notes in real-time | `git clone ...slopsmith-plugin-fretboard.git fretboard` |
 | [Tab View](https://github.com/byrongamatos/slopsmith-plugin-tabview) | Scrolling guitar tablature notation via alphaTab | `git clone ...slopsmith-plugin-tabview.git tab_view` |
 | [MIDI Amp Control](https://github.com/byrongamatos/slopsmith-plugin-midi) | Auto-switch amp/modeler presets via MIDI on tone changes | `git clone ...slopsmith-plugin-midi.git midi_amp` |
+| [Section Map](https://github.com/byrongamatos/slopsmith-plugin-sectionmap) | Color-coded song structure minimap with clickable navigation | `git clone ...slopsmith-plugin-sectionmap.git section_map` |
 
 Install any plugin by cloning it into your `plugins/` directory and restarting:
 

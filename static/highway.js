@@ -932,6 +932,8 @@ const highway = (() => {
         getChords() { return chords; },
         getToneChanges() { return toneChanges; },
         getToneBase() { return toneBase; },
+        getSections() { return sections; },
+        getSongInfo() { return songInfo; },
         addDrawHook(fn) { _drawHooks.push(fn); },
 
         toggleLyrics() {
