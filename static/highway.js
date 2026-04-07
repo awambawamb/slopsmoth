@@ -925,6 +925,8 @@ const highway = (() => {
 
         getBeats() { return beats; },
         getTime() { return currentTime; },
+        getNotes() { return notes; },
+        getChords() { return chords; },
         addDrawHook(fn) { _drawHooks.push(fn); },
 
         toggleLyrics() {
