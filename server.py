@@ -273,13 +273,39 @@ def _get_dlc_dir() -> Path | None:
 # ── Background metadata scan ──────────────────────────────────────────────────
 
 def _tuning_name(offsets: list[int]) -> str:
-    if all(o == 0 for o in offsets): return "E Standard"
-    if all(o == -1 for o in offsets): return "Eb Standard"
-    if all(o == -2 for o in offsets): return "D Standard"
-    if offsets == [-2, 0, 0, 0, 0, 0]: return "Drop D"
-    if offsets == [-4, -2, -2, -2, -2, -2]: return "Drop C"
-    if all(o == -3 for o in offsets): return "C# Standard"
-    if all(o == -4 for o in offsets): return "C Standard"
+    # Standard tunings (all strings same offset)
+    standard = {
+        0: "E Standard", -1: "Eb Standard", -2: "D Standard",
+        -3: "C# Standard", -4: "C Standard", -5: "B Standard",
+        -6: "Bb Standard", -7: "A Standard",
+        1: "F Standard", 2: "F# Standard",
+    }
+    if len(offsets) >= 6 and all(o == offsets[0] for o in offsets):
+        name = standard.get(offsets[0])
+        if name:
+            return name
+
+    # Drop tunings (low string 2 semitones below the rest)
+    if len(offsets) >= 6 and offsets[0] == offsets[1] - 2 and all(o == offsets[1] for o in offsets[1:]):
+        base = standard.get(offsets[1], "").replace(" Standard", "")
+        if base:
+            return f"Drop {base}"
+
+    # Common named tunings
+    named = {
+        (-2, 0, 0, 0, 0, 0): "Drop D",
+        (-4, -2, -2, -2, -2, -2): "Drop C",
+        (-2, -2, 0, 0, 0, 0): "Double Drop D",
+        (0, 0, 0, -1, 0, 0): "Open G",
+        (-2, -2, 0, 0, -2, -2): "Open D",
+        (-2, 0, 0, 0, -2, 0): "DADGAD",
+        (0, 2, 2, 1, 0, 0): "Open E",
+        (-2, 0, 0, 2, 3, 2): "Open D (alt)",
+    }
+    key = tuple(offsets[:6])
+    if key in named:
+        return named[key]
+
     return " ".join(str(o) for o in offsets)
 
 
