@@ -403,7 +403,10 @@ def _background_scan():
         _scan_status = {"running": False, "total": 0, "done": 0, "current": ""}
         return
 
-    psarcs = [f for f in sorted(dlc.iterdir()) if f.suffix == ".psarc" and f.is_file()]
+    # Skip RS1 compatibility mega-PSARCs (multi-song, not individually playable)
+    psarcs = [f for f in sorted(dlc.iterdir())
+              if f.suffix == ".psarc" and f.is_file()
+              and "rs1compatibility" not in f.name.lower()]
     current_files = {f.name for f in psarcs}
 
     # Clean up stale DB entries
