@@ -906,24 +906,31 @@ const highway = (() => {
                                 const bar = document.getElementById('audio-buffer-bar');
                                 const pct = document.getElementById('audio-buffer-pct');
 
+                                const MIN_BUFFER_SECS = 30;
+
                                 function onProgress() {
                                     if (audio.buffered.length > 0 && audio.duration > 0) {
                                         const loaded = audio.buffered.end(audio.buffered.length - 1);
                                         const p = Math.round((loaded / audio.duration) * 100);
                                         if (bar) bar.style.width = p + '%';
                                         if (pct) pct.textContent = p + '%';
+                                        // Dismiss when enough is buffered
+                                        if (loaded >= MIN_BUFFER_SECS || loaded >= audio.duration) {
+                                            cleanup();
+                                        }
                                     }
                                 }
 
-                                function onReady() {
+                                function cleanup() {
                                     audio.removeEventListener('progress', onProgress);
-                                    audio.removeEventListener('canplaythrough', onReady);
+                                    audio.removeEventListener('canplaythrough', cleanup);
                                     const ol = document.getElementById('audio-buffer-overlay');
                                     if (ol) ol.remove();
                                 }
 
                                 audio.addEventListener('progress', onProgress);
-                                audio.addEventListener('canplaythrough', onReady, { once: true });
+                                // Fallback: also dismiss on canplaythrough
+                                audio.addEventListener('canplaythrough', cleanup, { once: true });
                             }
                         }
                         // Populate arrangement dropdown
