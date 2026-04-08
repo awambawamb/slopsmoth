@@ -429,6 +429,32 @@ async function rescanLibrary() {
     }, 1000);
 }
 
+async function fullRescanLibrary() {
+    if (!confirm('This will clear the entire library cache and re-scan all songs. This can take a long time with large libraries. Continue?')) return;
+    const btn = document.getElementById('btn-full-rescan');
+    const status = document.getElementById('rescan-status');
+    btn.disabled = true;
+    btn.textContent = 'Clearing...';
+    const resp = await fetch('/api/rescan/full', { method: 'POST' });
+    const data = await resp.json();
+    btn.textContent = 'Scanning...';
+    status.textContent = data.message;
+    const poll = setInterval(async () => {
+        const sr = await fetch('/api/scan-status');
+        const sd = await sr.json();
+        if (sd.running) {
+            status.textContent = `${sd.done} / ${sd.total} scanned...`;
+        } else {
+            clearInterval(poll);
+            btn.disabled = false;
+            btn.textContent = 'Full Rescan';
+            status.textContent = 'Done!';
+            _treeStats = null;
+            loadLibrary();
+        }
+    }, 1000);
+}
+
 // ── Plugin functions loaded dynamically from plugin screen.js files ──────
 // (searchCF, installCF, loginCF, searchUG, buildFromUG, etc.)
 

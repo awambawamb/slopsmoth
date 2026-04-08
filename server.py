@@ -521,6 +521,19 @@ def trigger_rescan():
     return {"message": "Rescan started"}
 
 
+@app.post("/api/rescan/full")
+def trigger_full_rescan():
+    """Clear cache and rescan everything."""
+    if _scan_status["running"]:
+        return {"message": "Scan already in progress"}
+    with meta_db._lock:
+        meta_db.conn.execute("DELETE FROM songs")
+        meta_db.conn.commit()
+    thread = threading.Thread(target=_background_scan, daemon=True)
+    thread.start()
+    return {"message": "Full rescan started"}
+
+
 # ── Library API ───────────────────────────────────────────────────────────────
 
 @app.get("/api/library")
