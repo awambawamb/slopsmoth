@@ -449,7 +449,7 @@ function retuneSong(filename, title, tuning) {
         </div>`;
     document.body.appendChild(modal);
 
-    const ws = new WebSocket(`ws://${location.host}/ws/retune?filename=${encodeURIComponent(decodeURIComponent(filename))}`);
+    const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws/retune?filename=${encodeURIComponent(decodeURIComponent(filename))}`);
     ws.onmessage = (ev) => {
         const msg = JSON.parse(ev.data);
         if (msg.progress !== undefined) {
@@ -532,7 +532,7 @@ async function playSong(filename, arrangement) {
     highway.init(document.getElementById('highway'));
 
     const arrParam = arrangement !== undefined ? `?arrangement=${arrangement}` : '';
-    const wsUrl = `ws://${location.host}/ws/highway/${decodeURIComponent(filename)}${arrParam}`;
+    const wsUrl = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws/highway/${decodeURIComponent(filename)}${arrParam}`;
     highway.connect(wsUrl);
     loadSavedLoops();
     document.getElementById('quality-select').value = highway.getRenderScale();
