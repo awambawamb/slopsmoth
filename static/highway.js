@@ -885,13 +885,45 @@ const highway = (() => {
                             if (!audio.src || !audio.src.includes(msg.audio_url.split('/').pop())) {
                                 audio.src = msg.audio_url;
                                 audio.load();
-                                // Show buffering state until enough is loaded
-                                const playBtn = document.getElementById('btn-play');
-                                if (playBtn) playBtn.textContent = 'Buffering...';
-                                audio.addEventListener('canplaythrough', function _ready() {
-                                    audio.removeEventListener('canplaythrough', _ready);
-                                    if (playBtn) playBtn.textContent = '▶ Play';
-                                }, { once: true });
+
+                                // Show buffering overlay
+                                let overlay = document.getElementById('audio-buffer-overlay');
+                                if (!overlay) {
+                                    overlay = document.createElement('div');
+                                    overlay.id = 'audio-buffer-overlay';
+                                    overlay.className = 'fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm';
+                                    overlay.innerHTML = `
+                                        <div class="bg-dark-700 border border-gray-700 rounded-2xl p-6 w-72 text-center shadow-2xl">
+                                            <div class="text-sm text-gray-300 mb-3">Loading audio...</div>
+                                            <div style="height:6px;background:#1a1a2e;border-radius:999px;overflow:hidden">
+                                                <div id="audio-buffer-bar" style="height:100%;background:linear-gradient(90deg,#4080e0,#60a0ff);border-radius:999px;width:0%;transition:width 0.3s"></div>
+                                            </div>
+                                            <div class="text-xs text-gray-500 mt-2" id="audio-buffer-pct">0%</div>
+                                        </div>`;
+                                    document.body.appendChild(overlay);
+                                }
+
+                                const bar = document.getElementById('audio-buffer-bar');
+                                const pct = document.getElementById('audio-buffer-pct');
+
+                                function onProgress() {
+                                    if (audio.buffered.length > 0 && audio.duration > 0) {
+                                        const loaded = audio.buffered.end(audio.buffered.length - 1);
+                                        const p = Math.round((loaded / audio.duration) * 100);
+                                        if (bar) bar.style.width = p + '%';
+                                        if (pct) pct.textContent = p + '%';
+                                    }
+                                }
+
+                                function onReady() {
+                                    audio.removeEventListener('progress', onProgress);
+                                    audio.removeEventListener('canplaythrough', onReady);
+                                    const ol = document.getElementById('audio-buffer-overlay');
+                                    if (ol) ol.remove();
+                                }
+
+                                audio.addEventListener('progress', onProgress);
+                                audio.addEventListener('canplaythrough', onReady, { once: true });
                             }
                         }
                         // Populate arrangement dropdown
