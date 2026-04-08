@@ -21,6 +21,7 @@ const highway = (() => {
     let ready = false;
     let showLyrics = true;
     let _drawHooks = [];  // plugin draw callbacks: fn(ctx, W, H)
+    let _renderScale = parseFloat(localStorage.getItem('renderScale') || '1');  // 1 = full, 0.5 = half res
 
     // Rendering config
     const VISIBLE_SECONDS = 3.0;
@@ -846,9 +847,21 @@ const highway = (() => {
             if (!canvas) return;
             const controls = document.getElementById('player-controls');
             const controlsH = controls ? controls.offsetHeight : 50;
-            canvas.width = document.documentElement.clientWidth;
-            canvas.height = document.documentElement.clientHeight - controlsH;
+            const w = document.documentElement.clientWidth;
+            const h = document.documentElement.clientHeight - controlsH;
+            canvas.style.width = w + 'px';
+            canvas.style.height = h + 'px';
+            canvas.width = Math.round(w * _renderScale);
+            canvas.height = Math.round(h * _renderScale);
         },
+
+        setRenderScale(scale) {
+            _renderScale = Math.max(0.25, Math.min(1, scale));
+            localStorage.setItem('renderScale', _renderScale);
+            this.resize();
+        },
+
+        getRenderScale() { return _renderScale; },
 
         connect(wsUrl) {
             ws = new WebSocket(wsUrl);

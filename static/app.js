@@ -535,6 +535,7 @@ async function playSong(filename, arrangement) {
     const wsUrl = `ws://${location.host}/ws/highway/${decodeURIComponent(filename)}${arrParam}`;
     highway.connect(wsUrl);
     loadSavedLoops();
+    document.getElementById('quality-select').value = highway.getRenderScale();
 }
 
 function changeArrangement(index) {

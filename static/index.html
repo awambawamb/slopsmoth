@@ -205,6 +205,11 @@
             <input type="range" id="volume" min="0" max="100" value="80" oninput="setVolume(this.value)" class="w-20 accent-accent">
             <span id="vol-label" class="text-xs text-gray-500 w-8">80%</span>
             <button onclick="highway.toggleLyrics()" id="btn-lyrics" class="px-3 py-1.5 bg-purple-900/40 hover:bg-purple-900/60 rounded-lg text-xs text-purple-300 transition">Lyrics ✓</button>
+            <select id="quality-select" onchange="highway.setRenderScale(parseFloat(this.value))" class="bg-dark-600 border border-gray-700 rounded-lg px-2 py-1.5 text-xs text-gray-300 outline-none">
+                <option value="1">HD</option>
+                <option value="0.75">Medium</option>
+                <option value="0.5">Low</option>
+            </select>
             <span class="text-gray-700 mx-1">|</span>
             <button onclick="setLoopStart()" id="btn-loop-a" class="px-3 py-1.5 bg-dark-600 hover:bg-dark-500 rounded-lg text-xs text-gray-300 transition" title="Set loop start at current time">A</button>
             <button onclick="setLoopEnd()" id="btn-loop-b" class="px-3 py-1.5 bg-dark-600 hover:bg-dark-500 rounded-lg text-xs text-gray-300 transition" title="Set loop end at current time">B</button>
