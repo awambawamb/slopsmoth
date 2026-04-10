@@ -180,8 +180,9 @@ class MetadataDB:
         return songs, total
 
     def query_artists(self, letter: str = "", q: str = "",
-                      favorites_only: bool = False) -> list[dict]:
-        """Get artists grouped by letter with their albums and songs."""
+                      favorites_only: bool = False,
+                      page: int = 0, size: int = 50) -> tuple[list[dict], int]:
+        """Get artists grouped by letter with their albums and songs. Returns (artists, total_artists)."""
         where = "WHERE title != ''"
         params = []
         if favorites_only:
@@ -195,10 +196,29 @@ class MetadataDB:
             where += " AND (title LIKE ? COLLATE NOCASE OR artist LIKE ? COLLATE NOCASE OR album LIKE ? COLLATE NOCASE)"
             params += [f"%{q}%"] * 3
 
+        # Get paginated distinct artists
+        total_artists = self.conn.execute(
+            f"SELECT COUNT(DISTINCT artist COLLATE NOCASE) FROM songs {where}", params
+        ).fetchone()[0]
+
+        artist_rows = self.conn.execute(
+            f"SELECT DISTINCT artist COLLATE NOCASE as a FROM songs {where} ORDER BY a LIMIT ? OFFSET ?",
+            params + [size, page * size]
+        ).fetchall()
+        artist_names = [r[0] for r in artist_rows]
+
+        if not artist_names:
+            return [], total_artists
+
+        # Fetch songs for these artists only
+        placeholders = ",".join(["?"] * len(artist_names))
+        song_where = f"{where} AND artist COLLATE NOCASE IN ({placeholders})"
+        song_params = params + artist_names
+
         rows = self.conn.execute(
             f"SELECT filename, title, artist, album, year, duration, tuning, arrangements, has_lyrics "
-            f"FROM songs {where} ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE, title COLLATE NOCASE",
-            params
+            f"FROM songs {song_where} ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE, title COLLATE NOCASE",
+            song_params
         ).fetchall()
 
         # Group into artist -> album -> songs
@@ -231,7 +251,7 @@ class MetadataDB:
                 albums.append({"name": bval["name"], "songs": bval["songs"]})
             result.append({"name": aval["name"], "album_count": len(albums),
                            "song_count": sum(len(a["songs"]) for a in albums), "albums": albums})
-        return result
+        return result, total_artists
 
     def query_stats(self, favorites_only: bool = False) -> dict:
         """Aggregate stats for the letter bar."""
@@ -552,10 +572,11 @@ def list_library(q: str = "", page: int = 0, size: int = 24, sort: str = "artist
 
 
 @app.get("/api/library/artists")
-def list_artists(letter: str = "", q: str = "", favorites: int = 0):
+def list_artists(letter: str = "", q: str = "", favorites: int = 0, page: int = 0, size: int = 50):
     """Get artists grouped by letter with albums and songs (for tree view)."""
-    artists = meta_db.query_artists(letter=letter, q=q, favorites_only=bool(favorites))
-    return {"artists": artists}
+    artists, total = meta_db.query_artists(letter=letter, q=q, favorites_only=bool(favorites),
+                                           page=page, size=min(size, 100))
+    return {"artists": artists, "total_artists": total, "page": page, "size": size}
 
 
 @app.get("/api/library/stats")

@@ -165,12 +165,17 @@ async function loadTreeView() {
     await renderTreeInto('lib-tree', 'lib-count', _treeStats, _treeLetter, q, false);
 }
 
-async function renderTreeInto(containerId, countId, stats, letter, q, favoritesOnly) {
+let _treePage = 0;
+const TREE_PAGE_SIZE = 50;
+
+async function renderTreeInto(containerId, countId, stats, letter, q, favoritesOnly, page) {
+    if (page === undefined) page = favoritesOnly ? _favTreePage || 0 : _treePage;
     const container = document.getElementById(containerId);
     const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ#'.split('');
     const chevron = `<svg class="chevron w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>`;
 
     const letterFn = favoritesOnly ? 'filterFavTreeLetter' : 'filterTreeLetter';
+    const pageFn = favoritesOnly ? 'goFavTreePage' : 'goTreePage';
     let html = '<div class="flex flex-wrap gap-1 mb-6">';
     html += `<button onclick="${letterFn}('')" class="px-2 py-1 rounded text-xs transition ${
         !letter ? 'bg-accent text-white' : 'bg-dark-700 text-gray-400 hover:text-white'
@@ -186,27 +191,24 @@ async function renderTreeInto(containerId, countId, stats, letter, q, favoritesO
     }
     html += '</div>';
 
-    if (!letter && !q) {
-        html += '<p class="text-gray-500 text-sm">Select a letter to browse artists, or search above.</p>';
-        document.getElementById(countId).textContent =
-            `${stats.total_songs} songs · ${stats.total_artists} artists`;
-        container.innerHTML = html;
-        return;
-    }
-
-    // Fetch artists for the selected letter
+    // Fetch artists for the selected letter/all
     const params = new URLSearchParams();
     if (letter) params.set('letter', letter);
     if (q) params.set('q', q);
     if (favoritesOnly) params.set('favorites', '1');
+    params.set('page', page);
+    params.set('size', TREE_PAGE_SIZE);
     const resp = await fetch(`/api/library/artists?${params}`);
     const data = await resp.json();
     const artists = data.artists || [];
+    const totalArtists = data.total_artists || 0;
+    const totalPages = Math.ceil(totalArtists / TREE_PAGE_SIZE);
 
     let songCount = 0, artistCount = artists.length;
     for (const a of artists) songCount += a.song_count;
+    const pageInfo = totalPages > 1 ? ` · Page ${page + 1} of ${totalPages}` : '';
     document.getElementById(countId).textContent =
-        `${songCount} songs · ${artistCount} artists`;
+        `${totalArtists} artists (${songCount} songs on this page)${pageInfo}`;
 
     for (const artist of artists) {
         const openClass = q || artists.length <= 5 ? ' open' : '';
@@ -265,11 +267,34 @@ async function renderTreeInto(containerId, countId, stats, letter, q, favoritesO
         }
         html += `</div></div>`;
     }
+
+    // Pagination
+    if (totalPages > 1) {
+        html += '<div class="flex items-center justify-center gap-2 py-6">';
+        html += `<button onclick="${pageFn}(0)" class="px-3 py-1.5 rounded-lg text-xs ${page === 0 ? 'text-gray-600' : 'bg-dark-600 text-gray-300 hover:bg-dark-500'}" ${page === 0 ? 'disabled' : ''}>« First</button>`;
+        html += `<button onclick="${pageFn}(${page - 1})" class="px-3 py-1.5 rounded-lg text-xs ${page === 0 ? 'text-gray-600' : 'bg-dark-600 text-gray-300 hover:bg-dark-500'}" ${page === 0 ? 'disabled' : ''}>‹ Prev</button>`;
+        const start = Math.max(0, page - 2);
+        const end = Math.min(totalPages, start + 5);
+        for (let i = start; i < end; i++) {
+            html += `<button onclick="${pageFn}(${i})" class="px-3 py-1.5 rounded-lg text-xs ${i === page ? 'bg-accent text-white' : 'bg-dark-600 text-gray-300 hover:bg-dark-500'}">${i + 1}</button>`;
+        }
+        html += `<button onclick="${pageFn}(${page + 1})" class="px-3 py-1.5 rounded-lg text-xs ${page >= totalPages - 1 ? 'text-gray-600' : 'bg-dark-600 text-gray-300 hover:bg-dark-500'}" ${page >= totalPages - 1 ? 'disabled' : ''}>Next ›</button>`;
+        html += `<button onclick="${pageFn}(${totalPages - 1})" class="px-3 py-1.5 rounded-lg text-xs ${page >= totalPages - 1 ? 'text-gray-600' : 'bg-dark-600 text-gray-300 hover:bg-dark-500'}" ${page >= totalPages - 1 ? 'disabled' : ''}>Last »</button>`;
+        html += '</div>';
+    }
+
     container.innerHTML = html;
+}
+
+function goTreePage(p) {
+    _treePage = Math.max(0, p);
+    loadTreeView();
+    document.getElementById('library-section').scrollIntoView({ behavior: 'smooth' });
 }
 
 function filterTreeLetter(letter) {
     _treeLetter = (_treeLetter === letter) ? '' : letter;
+    _treePage = 0;
     loadTreeView();
 }
 
@@ -288,6 +313,7 @@ function esc(s) {
 let favView = 'grid';
 let favPage = 0;
 let _favTreeLetter = '';
+let _favTreePage = 0;
 let _favTreeStats = null;
 let _favDebounce = null;
 
@@ -389,6 +415,12 @@ async function loadFavTreeView() {
 
 function filterFavTreeLetter(letter) {
     _favTreeLetter = (_favTreeLetter === letter) ? '' : letter;
+    _favTreePage = 0;
+    loadFavTreeView();
+}
+
+function goFavTreePage(p) {
+    _favTreePage = Math.max(0, p);
     loadFavTreeView();
 }
 
