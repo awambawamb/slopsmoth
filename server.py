@@ -316,6 +316,7 @@ def _extract_meta_fast(psarc_path: Path) -> dict:
     title = artist = album = year = ""
     duration = 0.0
     tuning = "E Standard"
+    _tuning_from_guitar = False
     arrangements = []
     has_lyrics = False
     arr_index = 0
@@ -343,11 +344,16 @@ def _extract_meta_fast(psarc_path: Path) -> dict:
                         try: duration = float(sl)
                         except (ValueError, TypeError): pass
                 if arr_name:
-                    # Get tuning from first arrangement
+                    # Get tuning - prefer guitar arrangements over bass
                     tun = attrs.get("Tuning")
-                    if tun and isinstance(tun, dict) and tuning == "E Standard":
+                    if tun and isinstance(tun, dict):
                         offsets = [tun.get(f"string{i}", 0) for i in range(6)]
-                        tuning = _tuning_name(offsets)
+                        tun_name = _tuning_name(offsets)
+                        is_guitar = arr_name in ("Lead", "Rhythm", "Combo")
+                        if tuning == "E Standard" or (is_guitar and not _tuning_from_guitar):
+                            tuning = tun_name
+                            if is_guitar:
+                                _tuning_from_guitar = True
                     notes = attrs.get("NotesHard", 0) or attrs.get("NotesMedium", 0) or 0
                     arrangements.append({"index": arr_index, "name": arr_name, "notes": notes})
                     arr_index += 1
