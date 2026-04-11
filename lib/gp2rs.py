@@ -513,6 +513,27 @@ def _build_xml(
     return dom.toprettyxml(indent="  ", encoding=None)
 
 
+PIANO_INSTRUMENTS = set(range(0, 8))  # MIDI instruments 0-7 = piano family
+KEYS_INSTRUMENTS = PIANO_INSTRUMENTS | set(range(16, 24)) | {80, 81, 82, 83}  # + organs + synth leads
+KEYS_NAME_KEYWORDS = {"piano", "keys", "keyboard", "synth", "organ", "rhodes", "wurlitzer", "clav", "epiano"}
+
+
+def is_piano_track(track: guitarpro.Track) -> bool:
+    """Detect if a GP track is a piano/keyboard instrument."""
+    if track.isPercussionTrack:
+        return False
+    # Check MIDI instrument
+    if hasattr(track, 'channel') and track.channel:
+        inst = getattr(track.channel, 'instrument', -1)
+        if inst in KEYS_INSTRUMENTS:
+            return True
+    # Check name
+    name_low = track.name.lower()
+    if any(kw in name_low for kw in KEYS_NAME_KEYWORDS):
+        return True
+    return False
+
+
 def list_tracks(gp_path: str) -> list[dict]:
     """List all tracks in a Guitar Pro file with basic info."""
     song = guitarpro.parse(gp_path)
@@ -523,21 +544,26 @@ def list_tracks(gp_path: str) -> list[dict]:
             for voice in measure.voices:
                 for beat in voice.beats:
                     note_count += len(beat.notes)
+        instrument = -1
+        if hasattr(track, 'channel') and track.channel:
+            instrument = getattr(track.channel, 'instrument', -1)
         tracks.append({
             "index": i,
             "name": track.name,
             "strings": len(track.strings),
             "is_percussion": track.isPercussionTrack,
+            "is_piano": is_piano_track(track),
+            "instrument": instrument,
             "notes": note_count,
         })
     return tracks
 
 
 def auto_select_tracks(gp_path: str) -> tuple[list[int], dict[int, str]]:
-    """Auto-select guitar/bass tracks and assign Rocksmith arrangement names.
+    """Auto-select guitar/bass/keys tracks and assign Rocksmith arrangement names.
 
-    Filters out non-guitar tracks (synth, organ, strings, choir, etc.)
-    based on track name and string count.
+    Includes piano/keyboard tracks as "Keys" arrangements alongside
+    guitar and bass tracks.
 
     Returns:
         (track_indices, name_map) — indices to include and their arrangement names
@@ -545,12 +571,18 @@ def auto_select_tracks(gp_path: str) -> tuple[list[int], dict[int, str]]:
     tracks = list_tracks(gp_path)
     guitar_keywords = {"guitar", "gtr", "lead", "rhythm", "rhy", "solo", "clean", "distort", "acoustic", "elec"}
     bass_keywords = {"bass"}
-    skip_keywords = {"synth", "organ", "string", "choir", "brass", "piano", "key", "pad", "brite", "flute", "violin", "cello", "horn"}
+    skip_keywords = {"string", "choir", "brass", "brite", "flute", "violin", "cello", "horn"}
 
     selected = []
     for t in tracks:
         if t["is_percussion"] or t["notes"] == 0:
             continue
+
+        # Piano/keyboard tracks → Keys
+        if t["is_piano"]:
+            selected.append((t["index"], "keys"))
+            continue
+
         name_low = t["name"].lower()
 
         # 4-string = bass
@@ -578,16 +610,20 @@ def auto_select_tracks(gp_path: str) -> tuple[list[int], dict[int, str]]:
                 role = "bass" if t["strings"] == 4 else "guitar"
                 selected.append((t["index"], role))
 
-    # Assign Rocksmith names: Lead, Rhythm, Combo, Bass
+    # Assign Rocksmith names: Lead, Rhythm, Combo, Bass, Keys
     track_indices = []
     name_map = {}
     lead_count = 0
     rhythm_count = 0
     bass_count = 0
+    keys_count = 0
 
     for idx, role in selected:
         track_indices.append(idx)
-        if role == "bass":
+        if role == "keys":
+            keys_count += 1
+            name_map[idx] = "Keys" if keys_count == 1 else f"Keys {keys_count}"
+        elif role == "bass":
             bass_count += 1
             name_map[idx] = "Bass" if bass_count == 1 else f"Bass {bass_count}"
         elif lead_count == 0:
@@ -598,6 +634,166 @@ def auto_select_tracks(gp_path: str) -> tuple[list[int], dict[int, str]]:
             name_map[idx] = "Rhythm" if rhythm_count == 1 else f"Combo"
 
     return track_indices, name_map
+
+
+def convert_piano_track(
+    song: guitarpro.Song,
+    track_index: int,
+    audio_offset: float = 0.0,
+    arrangement_name: str = "Keys",
+) -> str:
+    """Convert a GP piano/keyboard track to Rocksmith XML using MIDI encoding.
+
+    Encodes MIDI notes into Rocksmith's string+fret format:
+        string = midi_note // 24
+        fret   = midi_note % 24
+
+    This gives a range of 0-143, covering the full piano range within
+    Rocksmith's 6-string x 24-fret structure. The piano highway plugin
+    decodes back via: midi = string * 24 + fret.
+    """
+    track = song.tracks[track_index]
+    tempo_map = _build_tempo_map(song)
+
+    # ── Collect beats ────────────────────────────────────────────────
+    beats = []
+    for mh in song.measureHeaders:
+        t = _tick_to_seconds(mh.start, tempo_map) + audio_offset
+        beats.append(RsBeat(time=t, measure=mh.number))
+        tempo = _tempo_at_tick(mh.start, tempo_map)
+        num_beats_in_measure = mh.timeSignature.numerator
+        for b in range(1, num_beats_in_measure):
+            sub_tick = mh.start + b * GP_TICKS_PER_QUARTER
+            sub_t = _tick_to_seconds(sub_tick, tempo_map) + audio_offset
+            beats.append(RsBeat(time=sub_t, measure=-1))
+    beats.sort(key=lambda b: b.time)
+
+    # ── Collect sections from markers ────────────────────────────────
+    sections = []
+    section_counts = {}
+    for mh in song.measureHeaders:
+        if mh.marker and mh.marker.title:
+            name = mh.marker.title.strip().lower().replace(" ", "")
+            section_counts[name] = section_counts.get(name, 0) + 1
+            t = _tick_to_seconds(mh.start, tempo_map) + audio_offset
+            sections.append(RsSection(name=name, time=t, number=section_counts[name]))
+    if not sections:
+        sections.append(RsSection(name="default", time=audio_offset, number=1))
+
+    # ── Collect notes ────────────────────────────────────────────────
+    rs_notes = []
+    rs_chords = []
+    chord_templates: list[ChordTemplate] = []
+    chord_template_map: dict[tuple, int] = {}
+
+    for measure in track.measures:
+        for voice in measure.voices:
+            for beat in voice.beats:
+                if not beat.notes:
+                    continue
+
+                t = _tick_to_seconds(beat.start, tempo_map) + audio_offset
+                tempo = _tempo_at_tick(beat.start, tempo_map)
+                dur = _duration_to_seconds(beat.duration, tempo)
+
+                beat_notes = []
+                for note in beat.notes:
+                    if note.type == guitarpro.NoteType.rest:
+                        continue
+
+                    # Get MIDI note value from the GP note
+                    # In GP, note.value is the fret, and the string tuning
+                    # gives the base MIDI value
+                    gp_str_idx = note.string  # 1-based in GP
+                    if gp_str_idx <= len(track.strings):
+                        base_midi = track.strings[gp_str_idx - 1].value
+                    else:
+                        base_midi = 60  # fallback to middle C
+                    midi_note = base_midi + note.value
+
+                    # Encode into Rocksmith string+fret
+                    rs_string = midi_note // 24
+                    rs_fret = midi_note % 24
+
+                    rn = RsNote(
+                        time=t,
+                        string=rs_string,
+                        fret=rs_fret,
+                        sustain=dur if dur > 0.15 else 0.0,
+                        mute=note.type == guitarpro.NoteType.dead,
+                    )
+
+                    # Accent from velocity
+                    eff = note.effect
+                    if eff.accentuatedNote or eff.heavyAccentuatedNote:
+                        rn.accent = True
+
+                    beat_notes.append(rn)
+
+                if not beat_notes:
+                    continue
+
+                if len(beat_notes) == 1:
+                    rs_notes.append(beat_notes[0])
+                else:
+                    # Piano chord: create template from MIDI-encoded positions
+                    frets = [-1] * 6
+                    for n in beat_notes:
+                        if 0 <= n.string < 6:
+                            frets[n.string] = n.fret
+                    fret_key = tuple(frets)
+
+                    if fret_key not in chord_template_map:
+                        chord_name = ""
+                        if beat.effect and beat.effect.chord:
+                            chord_name = beat.effect.chord.name or ""
+                        idx = len(chord_templates)
+                        chord_templates.append(ChordTemplate(
+                            name=chord_name,
+                            frets=list(frets),
+                            fingers=[-1] * 6,
+                        ))
+                        chord_template_map[fret_key] = idx
+
+                    rs_chords.append(RsChord(
+                        time=t,
+                        template_idx=chord_template_map[fret_key],
+                        notes=beat_notes,
+                    ))
+
+    rs_notes.sort(key=lambda n: n.time)
+    rs_chords.sort(key=lambda c: c.time)
+
+    # ── Anchors (simplified for piano — just cover the range) ────────
+    anchors = [RsAnchor(time=audio_offset, fret=1, width=24)]
+
+    # ── Song length ──────────────────────────────────────────────────
+    last_mh = song.measureHeaders[-1]
+    song_length = _tick_to_seconds(
+        last_mh.start + last_mh.timeSignature.numerator * GP_TICKS_PER_QUARTER,
+        tempo_map,
+    ) + audio_offset
+
+    # ── Build XML ────────────────────────────────────────────────────
+    # Use all-zero tuning (piano has no tuning concept)
+    return _build_xml(
+        title=song.title or "Untitled",
+        artist=song.artist or "Unknown",
+        album=song.album or "",
+        year=str(song.copyright) if song.copyright else "",
+        arrangement=arrangement_name,
+        tuning=[0] * 6,
+        num_strings=6,
+        song_length=song_length,
+        audio_offset=audio_offset,
+        beats=beats,
+        sections=sections,
+        notes=rs_notes,
+        chords=rs_chords,
+        chord_templates=chord_templates,
+        anchors=anchors,
+        tempo=song.tempo,
+    )
 
 
 def convert_file(
@@ -637,7 +833,16 @@ def convert_file(
     for idx in track_indices:
         track = song.tracks[idx]
         arr_name = names.get(idx, "")
-        xml_str = convert_track(song, idx, audio_offset, arr_name, force_standard_tuning)
+
+        # Route piano/keyboard tracks through the MIDI-encoding converter
+        if is_piano_track(track) or (arr_name and arr_name.lower().startswith("keys")):
+            xml_str = convert_piano_track(
+                song, idx, audio_offset, arr_name or "Keys"
+            )
+        else:
+            xml_str = convert_track(
+                song, idx, audio_offset, arr_name, force_standard_tuning
+            )
 
         safe_name = track.name.strip().replace(" ", "_").replace("/", "_")
         filename = f"{safe_name}_{arr_name or 'arr'}.xml"
