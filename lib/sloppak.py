@@ -283,6 +283,9 @@ def extract_meta(path: Path) -> dict:
     has_lyrics = bool(manifest.get("lyrics"))
     tuning_offsets = _tuning_for_meta(arr_list)
 
+    stems_list = manifest.get("stems", []) or []
+    stem_count = sum(1 for s in stems_list if isinstance(s, dict) and s.get("id"))
+
     return {
         "title": str(manifest.get("title", "")),
         "artist": str(manifest.get("artist", "")),
@@ -292,4 +295,5 @@ def extract_meta(path: Path) -> dict:
         "tuning_offsets": tuning_offsets,  # caller maps to a name via _tuning_name
         "arrangements": arrangements,
         "has_lyrics": has_lyrics,
+        "stem_count": stem_count,
     }

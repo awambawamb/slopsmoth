@@ -100,14 +100,20 @@ function goPage(p) {
     document.getElementById('library-section').scrollIntoView({ behavior: 'smooth' });
 }
 
-function formatBadge(fmt) {
+function formatBadge(fmt, stemCount) {
+    if (fmt === 'sloppak' && (stemCount || 0) > 1) {
+        return `<span class="fmt-badge absolute top-2 right-2 px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-900/80 text-purple-200 border border-purple-700">STEMS</span>`;
+    }
     if (fmt === 'sloppak') {
         return `<span class="fmt-badge absolute top-2 right-2 px-1.5 py-0.5 rounded text-[10px] font-bold bg-green-900/80 text-green-200 border border-green-700">SLOPPAK</span>`;
     }
     return `<span class="fmt-badge absolute top-2 right-2 px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-900/80 text-blue-200 border border-blue-700">PSARC</span>`;
 }
 
-function formatBadgeInline(fmt) {
+function formatBadgeInline(fmt, stemCount) {
+    if (fmt === 'sloppak' && (stemCount || 0) > 1) {
+        return `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-900/60 text-purple-300">STEMS</span>`;
+    }
     if (fmt === 'sloppak') {
         return `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-green-900/60 text-green-300">SLOPPAK</span>`;
     }
@@ -121,10 +127,11 @@ function renderGridCards(songs, containerId = 'lib-grid') {
         const artist = s.artist || '';
         const duration = s.duration ? formatTime(s.duration) : '';
         const tuning = s.tuning || '';
-        const artUrl = `/api/song/${encodeURIComponent(s.filename)}/art`;
-        const stdRetune = tuning && !s.has_estd &&
+        const artUrl = `/api/song/${encodeURIComponent(s.filename)}/art${s.mtime ? `?v=${Math.floor(s.mtime)}` : ''}`;
+        const isSloppak = s.format === 'sloppak';
+        const stdRetune = !isSloppak && tuning && !s.has_estd &&
             ['Eb Standard', 'D Standard', 'C# Standard', 'C Standard'].includes(tuning);
-        const dropRetune = tuning && !s.has_estd &&
+        const dropRetune = !isSloppak && tuning && !s.has_estd &&
             ['Drop C', 'Drop C#', 'Drop Bb', 'Drop A'].includes(tuning);
         const retuneBtn = stdRetune
             ? `<button data-retune="${encodeURIComponent(s.filename)}" data-title="${encodeURIComponent(title)}" data-tuning="${tuning}" data-target="E Standard"
@@ -135,7 +142,7 @@ function renderGridCards(songs, containerId = 'lib-grid') {
                 class="retune-btn mt-2 w-full px-2 py-1.5 bg-gold/10 hover:bg-gold/20 border border-gold/20 rounded-lg text-xs font-medium text-gold transition">
                 ⬆ Convert to Drop D</button>`
             : '';
-        const fmtBadge = formatBadge(s.format);
+        const fmtBadge = formatBadge(s.format, s.stem_count);
         return `<div class="song-card group" data-play="${encodeURIComponent(s.filename)}">
             <div class="card-art">
                 <img src="${artUrl}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
@@ -240,7 +247,7 @@ async function renderTreeInto(containerId, countId, stats, letter, q, favoritesO
         html += `</div><div class="artist-body">`;
 
         for (const album of artist.albums) {
-            const artUrl = `/api/song/${encodeURIComponent(album.songs[0].filename)}/art`;
+            const artUrl = `/api/song/${encodeURIComponent(album.songs[0].filename)}/art${album.songs[0].mtime ? `?v=${Math.floor(album.songs[0].mtime)}` : ''}`;
             const albumOpen = q || artist.albums.length === 1 ? ' open' : '';
             html += `<div class="album-group${albumOpen}">`;
             html += `<div class="album-header" onclick="this.parentElement.classList.toggle('open')">`;
@@ -254,14 +261,15 @@ async function renderTreeInto(containerId, countId, stats, letter, q, favoritesO
                 const title = s.title || s.filename;
                 const duration = s.duration ? formatTime(s.duration) : '';
                 const tuning = s.tuning || '';
-                const stdRetune = tuning && !s.has_estd &&
+                const isSloppak = s.format === 'sloppak';
+                const stdRetune = !isSloppak && tuning && !s.has_estd &&
                     ['Eb Standard', 'D Standard', 'C# Standard', 'C Standard'].includes(tuning);
-                const dropRetune = tuning && !s.has_estd &&
+                const dropRetune = !isSloppak && tuning && !s.has_estd &&
                     ['Drop C', 'Drop C#', 'Drop Bb', 'Drop A'].includes(tuning);
                 const canRetune = stdRetune || dropRetune;
                 const retuneTarget = stdRetune ? 'E Standard' : 'Drop D';
                 html += `<div class="song-row" data-play="${encodeURIComponent(s.filename)}">`;
-                html += `<div class="flex-1 min-w-0 flex items-center gap-2"><span class="text-sm text-white truncate block">${esc(title)}</span>${formatBadgeInline(s.format)}</div>`;
+                html += `<div class="flex-1 min-w-0 flex items-center gap-2"><span class="text-sm text-white truncate block">${esc(title)}</span>${formatBadgeInline(s.format, s.stem_count)}</div>`;
                 html += `<div class="flex items-center gap-1.5 flex-shrink-0 text-xs">`;
                 for (const a of (s.arrangements || [])) {
                     const cls = a.name === 'Lead' ? 'bg-red-900/40 text-red-300' :

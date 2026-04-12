@@ -59,12 +59,17 @@ class MetadataDB:
                 tuning TEXT,
                 arrangements TEXT,
                 has_lyrics INTEGER DEFAULT 0,
-                format TEXT DEFAULT 'psarc'
+                format TEXT DEFAULT 'psarc',
+                stem_count INTEGER DEFAULT 0
             )
         """)
         # Idempotent migration for installs that predate the format column.
         try:
             self.conn.execute("ALTER TABLE songs ADD COLUMN format TEXT DEFAULT 'psarc'")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            self.conn.execute("ALTER TABLE songs ADD COLUMN stem_count INTEGER DEFAULT 0")
         except sqlite3.OperationalError:
             pass
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_songs_artist ON songs(artist COLLATE NOCASE)")
@@ -103,7 +108,7 @@ class MetadataDB:
 
     def get(self, filename: str, mtime: float, size: int) -> dict | None:
         row = self.conn.execute(
-            "SELECT mtime, size, title, artist, album, year, duration, tuning, arrangements, has_lyrics, format "
+            "SELECT mtime, size, title, artist, album, year, duration, tuning, arrangements, has_lyrics, format, stem_count "
             "FROM songs WHERE filename = ?", (filename,)
         ).fetchone()
         if row and row[0] == mtime and row[1] == size and row[2]:
@@ -113,6 +118,7 @@ class MetadataDB:
                 "arrangements": json.loads(row[8]) if row[8] else [],
                 "has_lyrics": bool(row[9]),
                 "format": row[10] or "psarc",
+                "stem_count": int(row[11] or 0),
             }
         return None
 
@@ -120,13 +126,14 @@ class MetadataDB:
         with self._lock:
             self.conn.execute(
                 "INSERT OR REPLACE INTO songs "
-                "(filename, mtime, size, title, artist, album, year, duration, tuning, arrangements, has_lyrics, format) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "(filename, mtime, size, title, artist, album, year, duration, tuning, arrangements, has_lyrics, format, stem_count) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (filename, mtime, size, meta.get("title", ""), meta.get("artist", ""),
                  meta.get("album", ""), meta.get("year", ""), meta.get("duration", 0),
                  meta.get("tuning", ""), json.dumps(meta.get("arrangements", [])),
                  1 if meta.get("has_lyrics") else 0,
-                 meta.get("format", "psarc")),
+                 meta.get("format", "psarc"),
+                 int(meta.get("stem_count", 0) or 0)),
             )
             self.conn.commit()
 
@@ -181,7 +188,7 @@ class MetadataDB:
 
         total = self.conn.execute(f"SELECT COUNT(*) FROM songs {where}", params).fetchone()[0]
         rows = self.conn.execute(
-            f"SELECT filename, title, artist, album, year, duration, tuning, arrangements, has_lyrics, mtime, format "
+            f"SELECT filename, title, artist, album, year, duration, tuning, arrangements, has_lyrics, mtime, format, stem_count "
             f"FROM songs {where} ORDER BY {order} LIMIT ? OFFSET ?",
             params + [size, page * size]
         ).fetchall()
@@ -196,6 +203,7 @@ class MetadataDB:
                 "arrangements": json.loads(r[7]) if r[7] else [],
                 "has_lyrics": bool(r[8]), "mtime": r[9],
                 "format": r[10] or "psarc",
+                "stem_count": int(r[11] or 0),
                 "has_estd": r[0] in estd, "favorite": r[0] in favs,
             })
         return songs, total
@@ -241,7 +249,7 @@ class MetadataDB:
         song_params = params + artist_names
 
         rows = self.conn.execute(
-            f"SELECT filename, title, artist, album, year, duration, tuning, arrangements, has_lyrics, format "
+            f"SELECT filename, title, artist, album, year, duration, tuning, arrangements, has_lyrics, format, stem_count "
             f"FROM songs {song_where} ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE, title COLLATE NOCASE",
             song_params
         ).fetchall()
@@ -266,6 +274,7 @@ class MetadataDB:
                 "arrangements": json.loads(r[7]) if r[7] else [],
                 "has_lyrics": bool(r[8]),
                 "format": r[9] or "psarc",
+                "stem_count": int(r[10] or 0),
                 "has_estd": r[0] in estd,
                 "favorite": r[0] in favs,
             })
@@ -500,7 +509,18 @@ def _background_scan():
     sloppaks = [f for f in sorted(dlc.rglob("*.sloppak"))
                 if sloppak_mod.is_sloppak(f)]
     all_songs = psarcs + sloppaks
-    current_files = {f.name for f in all_songs}
+
+    def _rel(f: Path) -> str:
+        # Store the path relative to the DLC root so sub-folders (e.g.
+        # dlc/sloppak/foo.sloppak produced by the converter) resolve back
+        # correctly later. PSARCs always live directly in dlc/, so this
+        # reduces to f.name for them.
+        try:
+            return f.relative_to(dlc).as_posix()
+        except ValueError:
+            return f.name
+
+    current_files = {_rel(f) for f in all_songs}
 
     # Clean up stale DB entries
     stale = meta_db.delete_missing(current_files)
@@ -511,7 +531,7 @@ def _background_scan():
     to_scan = []
     for f in all_songs:
         stat = f.stat()
-        if not meta_db.get(f.name, stat.st_mtime, stat.st_size):
+        if not meta_db.get(_rel(f), stat.st_mtime, stat.st_size):
             to_scan.append((f, stat))
 
     if not to_scan:
@@ -524,7 +544,7 @@ def _background_scan():
     def _scan_one(item):
         f, stat = item
         meta = _extract_meta_for_file(f)
-        return f.name, stat.st_mtime, stat.st_size, meta
+        return _rel(f), stat.st_mtime, stat.st_size, meta
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
         futures = {executor.submit(_scan_one, item): item[0].name for item in to_scan}
@@ -745,6 +765,13 @@ async def ws_retune(websocket: WebSocket, filename: str, target: str = "E Standa
         await websocket.close()
         return
 
+    # Retune only operates on PSARC containers — sloppak is an open format
+    # and doesn't share the SNG/encryption pipeline retune.py depends on.
+    if filename.lower().endswith(".sloppak") or sloppak_mod.is_sloppak(psarc_path):
+        await websocket.send_json({"error": "Retune is not supported for .sloppak files"})
+        await websocket.close()
+        return
+
     progress_queue = asyncio.Queue()
 
     def _do_retune():
@@ -853,6 +880,28 @@ async def get_song_art(filename: str):
     psarc_path = dlc / filename
     if not psarc_path.exists():
         return JSONResponse({"error": "not found"}, 404)
+
+    # Sloppak path: pull cover.jpg from the source dir (manifest-declared or default).
+    if sloppak_mod.is_sloppak(psarc_path):
+        try:
+            src = sloppak_mod.resolve_source_dir(filename, dlc, SLOPPAK_CACHE_DIR)
+            manifest = sloppak_mod.load_manifest(psarc_path)
+            cover_rel = str(manifest.get("cover") or "cover.jpg")
+            cover_path = (src / cover_rel).resolve()
+            # Prevent escape and fall back to default name if missing.
+            try:
+                cover_path.relative_to(src.resolve())
+            except ValueError:
+                return JSONResponse({"error": "forbidden"}, 403)
+            if cover_path.exists() and cover_path.is_file():
+                mt = {
+                    ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                    ".png": "image/png", ".webp": "image/webp",
+                }.get(cover_path.suffix.lower(), "image/jpeg")
+                return FileResponse(str(cover_path), media_type=mt)
+        except Exception:
+            pass
+        return JSONResponse({"error": "no art"}, 404)
 
     # Check cache first
     art_cache = ART_CACHE_DIR
