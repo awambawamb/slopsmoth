@@ -4,6 +4,8 @@ A self-contained web application for browsing, playing, and practicing Rocksmith
 
 [![Video Overview](https://img.youtube.com/vi/f_XTS9tVeaU/maxresdefault.jpg)](https://www.youtube.com/watch?v=f_XTS9tVeaU)
 
+> **Looking for a desktop app?** [Slopsmith Desktop](https://github.com/byrongamatos/slopsmith-desktop) is a standalone native app for non-technical users — no Docker required. It includes everything in the web version plus a built-in audio engine with VST3/AU/LV2 plugin hosting, Neural Amp Modeler (NAM) for amp simulation, cabinet IR loading, and automatic tone switching that changes your signal chain as tones change during a song.
+
 ![Library](docs/library.png)
 ![Player](docs/player.png)
 
