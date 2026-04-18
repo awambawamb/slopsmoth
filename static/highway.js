@@ -8,6 +8,7 @@ function createHighway() {
     let animFrame = null;
     let _connectOpts = {};
     let _resizeContainer = null;
+    let _resizeHandler = null;
 
     // Song data (populated via WebSocket)
     let songInfo = {};
@@ -860,13 +861,15 @@ function createHighway() {
     }
 
     // ── Public API ───────────────────────────────────────────────────────
-    return {
+    const api = {
         init(canvasEl, container) {
             canvas = canvasEl;
             _resizeContainer = container || null;
             ctx = canvas.getContext('2d');
             this.resize();
-            window.addEventListener('resize', () => this.resize());
+            if (_resizeHandler) window.removeEventListener('resize', _resizeHandler);
+            _resizeHandler = () => this.resize();
+            window.addEventListener('resize', _resizeHandler);
             ready = false;
             notes = []; chords = []; beats = []; sections = []; anchors = []; lyrics = []; toneChanges = []; toneBase = "";
         },
@@ -1011,7 +1014,7 @@ function createHighway() {
                         ready = true;
                         console.log(`Highway ready: ${notes.length} notes, ${chords.length} chords`);
                         if (!animFrame) draw();
-                        if (highway._onReady) highway._onReady();
+                        if (api._onReady) api._onReady();
                         break;
                 }
             };
@@ -1083,9 +1086,14 @@ function createHighway() {
         stop() {
             if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
             if (ws) { ws.close(); ws = null; }
+            if (_resizeHandler) {
+                window.removeEventListener('resize', _resizeHandler);
+                _resizeHandler = null;
+            }
             ready = false;
         },
     };
+    return api;
 }
 const highway = createHighway();
 window.highway = highway; // expose for plugins
