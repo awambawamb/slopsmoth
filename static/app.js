@@ -5,7 +5,14 @@ function showScreen(id) {
     if (id === 'home') loadLibrary();
     if (id === 'favorites') loadFavorites();
     if (id === 'settings') loadSettings();
-    if (id !== 'player') { highway.stop(); }
+    if (id !== 'player') {
+        highway.stop();
+        const audio = document.getElementById('audio');
+        audio.pause();
+        audio.src = '';
+        isPlaying = false;
+        document.getElementById('btn-play').textContent = '▶ Play';
+    }
     window.scrollTo(0, 0);
 }
 

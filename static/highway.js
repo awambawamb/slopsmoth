@@ -1070,11 +1070,6 @@ function createHighway() {
             if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
             if (ws) { ws.close(); ws = null; }
             ready = false;
-            const audio = document.getElementById('audio');
-            audio.pause();
-            audio.src = '';
-            isPlaying = false;
-            document.getElementById('btn-play').textContent = '▶ Play';
         },
     };
 }
