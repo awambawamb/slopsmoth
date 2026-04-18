@@ -24,6 +24,12 @@ const PAGE_SIZE = 24;
 let _treeLetter = '';
 let _treeStats = null;
 let _debounceTimer = null;
+let _loadingMore = false;
+let _hasMore = true;
+let _gridObserver = null;
+// Bumped on filter/sort/view changes so in-flight page fetches can detect
+// they've been superseded and skip rendering stale results.
+let _libEpoch = 0;
 
 function setLibView(view) {
     libView = view;
@@ -33,8 +39,8 @@ function setLibView(view) {
     document.querySelectorAll('.lib-tree-ctrl').forEach(el => el.classList.toggle('hidden', view !== 'tree'));
     document.getElementById('view-grid-btn').className = `px-3 py-2.5 text-sm transition ${view === 'grid' ? 'text-accent-light' : 'text-gray-600 hover:text-gray-400'}`;
     document.getElementById('view-tree-btn').className = `px-3 py-2.5 text-sm transition ${view === 'tree' ? 'text-accent-light' : 'text-gray-600 hover:text-gray-400'}`;
-    const pag = document.getElementById('lib-pagination');
-    if (pag && view !== 'grid') pag.innerHTML = '';
+    if (view !== 'grid') stopInfiniteScroll();
+    _libEpoch++;
     loadLibrary();
 }
 
@@ -49,6 +55,7 @@ async function loadLibrary(page) {
 function filterLibrary() {
     clearTimeout(_debounceTimer);
     _debounceTimer = setTimeout(() => {
+        _libEpoch++;
         currentPage = 0;
         _treeLetter = '';
         loadLibrary(0);
@@ -56,56 +63,59 @@ function filterLibrary() {
 }
 
 function sortLibrary() {
+    _libEpoch++;
     currentPage = 0;
     loadLibrary(0);
 }
 
-// ── Grid View (server-side) ─────────────────────────────────────────────
+// ── Grid View (server-side pagination, infinite scroll) ────────────────
 
 async function loadGridPage(page = 0) {
+    const myEpoch = _libEpoch;
     const q = document.getElementById('lib-filter').value.trim();
     const sort = document.getElementById('lib-sort').value;
     const format = (document.getElementById('lib-format') || {}).value || '';
-    currentPage = page;
     const params = new URLSearchParams({ q, page, size: PAGE_SIZE, sort });
     if (format) params.set('format', format);
     const resp = await fetch(`/api/library?${params}`);
     const data = await resp.json();
-    const totalPages = Math.ceil((data.total || 0) / PAGE_SIZE);
+    if (myEpoch !== _libEpoch) return; // filter/sort/view changed mid-fetch
 
-    document.getElementById('lib-count').textContent =
-        `${data.total || 0} songs · Page ${currentPage + 1} of ${Math.max(1, totalPages)}`;
+    currentPage = page;
+    const total = data.total || 0;
+    document.getElementById('lib-count').textContent = `${total} songs`;
 
-    renderGridCards(data.songs || []);
-    renderPagination(totalPages);
+    renderGridCards(data.songs || [], 'lib-grid', page === 0 ? 'replace' : 'append');
+
+    _hasMore = (page + 1) * PAGE_SIZE < total;
+    setupInfiniteScroll();
 }
 
-function renderPagination(totalPages) {
-    let pag = document.getElementById('lib-pagination');
-    if (!pag) {
-        pag = document.createElement('div');
-        pag.id = 'lib-pagination';
-        pag.className = 'flex items-center justify-center gap-2 py-6';
-        document.getElementById('lib-grid').after(pag);
+function setupInfiniteScroll() {
+    let sentinel = document.getElementById('lib-grid-sentinel');
+    if (!sentinel) {
+        sentinel = document.createElement('div');
+        sentinel.id = 'lib-grid-sentinel';
+        sentinel.style.height = '1px';
+        document.getElementById('lib-grid').after(sentinel);
     }
-    if (totalPages <= 1) { pag.innerHTML = ''; return; }
-    let html = '';
-    html += `<button onclick="goPage(0)" class="px-3 py-1.5 rounded-lg text-xs ${currentPage === 0 ? 'text-gray-600 cursor-default' : 'bg-dark-600 text-gray-300 hover:bg-dark-500'}" ${currentPage === 0 ? 'disabled' : ''}>« First</button>`;
-    html += `<button onclick="goPage(${currentPage - 1})" class="px-3 py-1.5 rounded-lg text-xs ${currentPage === 0 ? 'text-gray-600 cursor-default' : 'bg-dark-600 text-gray-300 hover:bg-dark-500'}" ${currentPage === 0 ? 'disabled' : ''}>‹ Prev</button>`;
-    const start = Math.max(0, currentPage - 2);
-    const end = Math.min(totalPages, start + 5);
-    for (let i = start; i < end; i++) {
-        const active = i === currentPage;
-        html += `<button onclick="goPage(${i})" class="px-3 py-1.5 rounded-lg text-xs ${active ? 'bg-accent text-white' : 'bg-dark-600 text-gray-300 hover:bg-dark-500'}">${i + 1}</button>`;
-    }
-    html += `<button onclick="goPage(${currentPage + 1})" class="px-3 py-1.5 rounded-lg text-xs ${currentPage >= totalPages - 1 ? 'text-gray-600 cursor-default' : 'bg-dark-600 text-gray-300 hover:bg-dark-500'}" ${currentPage >= totalPages - 1 ? 'disabled' : ''}>Next ›</button>`;
-    html += `<button onclick="goPage(${totalPages - 1})" class="px-3 py-1.5 rounded-lg text-xs ${currentPage >= totalPages - 1 ? 'text-gray-600 cursor-default' : 'bg-dark-600 text-gray-300 hover:bg-dark-500'}" ${currentPage >= totalPages - 1 ? 'disabled' : ''}>Last »</button>`;
-    pag.innerHTML = html;
+    stopInfiniteScroll();
+    if (!_hasMore) return;
+    _gridObserver = new IntersectionObserver(async (entries) => {
+        if (entries[0].isIntersecting && !_loadingMore && _hasMore) {
+            _loadingMore = true;
+            try { await loadGridPage(currentPage + 1); }
+            finally { _loadingMore = false; }
+        }
+    }, { rootMargin: '400px' });
+    _gridObserver.observe(sentinel);
 }
 
-function goPage(p) {
-    loadLibrary(Math.max(0, p));
-    document.getElementById('library-section').scrollIntoView({ behavior: 'smooth' });
+function stopInfiniteScroll() {
+    if (_gridObserver) {
+        _gridObserver.disconnect();
+        _gridObserver = null;
+    }
 }
 
 function formatBadge(fmt, stemCount) {
@@ -128,9 +138,9 @@ function formatBadgeInline(fmt, stemCount) {
     return `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-900/60 text-blue-300">PSARC</span>`;
 }
 
-function renderGridCards(songs, containerId = 'lib-grid') {
+function renderGridCards(songs, containerId = 'lib-grid', mode = 'replace') {
     const grid = document.getElementById(containerId);
-    grid.innerHTML = songs.map(s => {
+    const html = songs.map(s => {
         const title = s.title || s.filename.replace(/_p\.psarc$/i, '').replace(/_/g, ' ');
         const artist = s.artist || '';
         const duration = s.duration ? formatTime(s.duration) : '';
@@ -185,6 +195,11 @@ function renderGridCards(songs, containerId = 'lib-grid') {
             </div>
         </div>`;
     }).join('');
+    if (mode === 'append') {
+        grid.insertAdjacentHTML('beforeend', html);
+    } else {
+        grid.innerHTML = html;
+    }
 }
 
 // ── Tree View (server-side) ─────────────────────────────────────────────
