@@ -553,19 +553,28 @@ def _background_scan():
     _scan_status = {**_SCAN_STATUS_INIT, "stage": "complete"}
 
 
-# ── Load plugins at import time (before app starts) ─────────────────────────
+# ── Register plugin API endpoints (lightweight, before app starts) ───────────
 from plugins import load_plugins, register_plugin_api
 register_plugin_api(app)
-load_plugins(app, {
-    "config_dir": CONFIG_DIR,
-    "get_dlc_dir": _get_dlc_dir,
-    "extract_meta": _extract_meta_for_file,
-    "meta_db": meta_db,
-    "get_sloppak_cache_dir": lambda: SLOPPAK_CACHE_DIR,
-})
+
+# Plugin loading deferred to startup event (see below) to avoid blocking
+# server startup when many plugins are installed.
 
 
 @app.on_event("startup")
+def startup_events():
+    # Load plugins in background after server starts
+    load_plugins(app, {
+        "config_dir": CONFIG_DIR,
+        "get_dlc_dir": _get_dlc_dir,
+        "extract_meta": _extract_meta_for_file,
+        "meta_db": meta_db,
+        "get_sloppak_cache_dir": lambda: SLOPPAK_CACHE_DIR,
+    })
+    # Start background metadata scan
+    startup_scan()
+
+
 def startup_scan():
     """Start background metadata scan and periodic rescan on server start."""
     thread = threading.Thread(target=_background_scan, daemon=True)
