@@ -172,6 +172,12 @@ pytest -k "round_trip" -v      # Pattern match
 - CI: GitHub Actions runs pytest on push/PR to main (Python 3.12)
 - Test dependencies: `requirements-test.txt`
 
+## Versioning
+
+- **`VERSION`** (repo root) — single source of truth; plain semver string (e.g. `0.2.4`). Bind-mounted into the container and copied by the Dockerfile so it's always available at `/app/VERSION`.
+- **`GET /api/version`** — returns `{"version": "<contents of VERSION>"}`. Displayed as a badge in the navbar.
+- **`CHANGELOG.md`** — follows [Keep a Changelog](https://keepachangelog.com/) format. Update the `[Unreleased]` section with each PR; bump `VERSION` and move entries to a dated release heading when cutting a release.
+
 ## Git Workflow
 
 - **Never push directly to main** — always create a feature branch and open a PR

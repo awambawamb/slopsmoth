@@ -31,9 +31,12 @@
     <!-- Navigation -->
     <nav id="navbar" class="fixed top-0 w-full z-50 transition-all duration-300">
         <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-            <a href="#" onclick="showScreen('home');return false" class="text-xl font-bold bg-gradient-to-r from-accent-light to-purple-400 bg-clip-text text-transparent">
-                Slopsmith
-            </a>
+            <div class="flex items-end gap-1.5">
+                <a href="#" onclick="showScreen('home');return false" class="text-xl font-bold bg-gradient-to-r from-accent-light to-purple-400 bg-clip-text text-transparent">
+                    Slopsmith
+                </a>
+                <span id="app-version" class="text-xs text-gray-600 mb-0.5"></span>
+            </div>
             <div class="hidden md:flex items-center gap-8">
                 <a href="#library-section" onclick="showScreen('home')" class="text-sm text-gray-400 hover:text-white transition">Library</a>
                 <a href="#" onclick="showScreen('favorites');return false" class="text-sm text-gray-400 hover:text-white transition">Favorites</a>

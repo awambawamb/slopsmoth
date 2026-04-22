@@ -595,6 +595,21 @@ def _periodic_rescan():
         time.sleep(300)
 
 
+@app.get("/api/version")
+def get_version():
+    env_version = os.environ.get("APP_VERSION", "").strip()
+    if env_version:
+        return {"version": env_version}
+    version_file = Path(__file__).parent / "VERSION"
+    version = "unknown"
+    if version_file.exists():
+        try:
+            version = version_file.read_text().strip()
+        except (OSError, UnicodeDecodeError):
+            pass
+    return {"version": version}
+
+
 @app.get("/api/scan-status")
 def scan_status():
     return _scan_status

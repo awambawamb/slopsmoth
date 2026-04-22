@@ -59,6 +59,7 @@ COPY lib/ /app/lib/
 COPY static/ /app/static/
 COPY plugins/ /app/plugins/
 COPY server.py /app/
+COPY VERSION /app/
 
 ENV PYTHONPATH=/app/lib:/app
 ENV RSCLI_PATH=/opt/rscli/RsCli
