@@ -311,6 +311,57 @@ function createHighway() {
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             fillTextReadable('0', W/2, y);
+
+            // Technique labels on open strings — PM, H/P/T, tremolo, and
+            // accent markers are all meaningful on fret 0. Bend and slide
+            // are omitted because they reference a fret position that the
+            // centered bar doesn't visually convey. Matches the sz<14 gate
+            // the fretted path uses so labels don't render on tiny bars.
+            // Fixes #21.
+            if (sz >= 14) {
+                // H / P / T above
+                if (hammerOn || pullOff || tap) {
+                    const label = tap ? 'T' : (hammerOn ? 'H' : 'P');
+                    ctx.fillStyle = '#fff';
+                    ctx.font = `bold ${Math.max(9, sz * 0.3) | 0}px sans-serif`;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'bottom';
+                    fillTextReadable(label, W/2, y - barH/2 - 4);
+                }
+                // PM below
+                if (palmMute) {
+                    ctx.fillStyle = '#aaa';
+                    ctx.font = `bold ${Math.max(8, sz * 0.25) | 0}px sans-serif`;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'top';
+                    fillTextReadable('PM', W/2, y + barH/2 + 2);
+                }
+                // Tremolo (wavy line above)
+                if (tremolo) {
+                    const ty = y - barH/2 - 6;
+                    ctx.strokeStyle = '#ff0';
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    for (let i = -3; i <= 3; i++) {
+                        const wx = W/2 + i * sz * 0.08;
+                        const wy = ty + Math.sin(i * 2) * 3;
+                        if (i === -3) ctx.moveTo(wx, wy);
+                        else ctx.lineTo(wx, wy);
+                    }
+                    ctx.stroke();
+                }
+                // Accent caret above
+                if (accent) {
+                    const ay2 = y - barH/2 - 4;
+                    ctx.strokeStyle = '#fff';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(W/2 - sz * 0.2, ay2 + 3);
+                    ctx.lineTo(W/2, ay2 - 2);
+                    ctx.lineTo(W/2 + sz * 0.2, ay2 + 3);
+                    ctx.stroke();
+                }
+            }
             return;
         }
 
