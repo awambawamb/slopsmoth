@@ -903,6 +903,14 @@ if (window.slopsmith) {
     // handler receives an Event, not the raw payload.
     window.slopsmith.on('song:ready', (e) => {
         _applyMasteryAvailability(!!e.detail?.hasPhraseData);
+        // Auto mode: re-evaluate the active renderer against the
+        // newly-loaded song. The picker's current <option> value is the
+        // source of truth here — localStorage is a persistence mirror
+        // that can throw in private / sandboxed contexts, and the
+        // picker already reflects fresh-install / post-cleanup
+        // fallthroughs to 'auto' even when writes failed.
+        const sel = document.getElementById('viz-picker');
+        if (sel && sel.value === 'auto') _autoMatchViz();
     });
     // Highway signals when it's auto-reverted to the default renderer
     // after a broken plugin (init failure or repeated draw failures).
@@ -935,10 +943,11 @@ async function _populateVizPicker(plugins) {
     if (!sel) return;
     // Clear any previously-appended plugin options so calling this
     // function more than once (e.g. from DevTools, or a hot-reloaded
-    // plugin) doesn't produce duplicates. The built-in "default"
-    // option is static markup, preserve it.
+    // plugin) doesn't produce duplicates. The built-in "auto" and
+    // "default" options are static markup — preserve them.
+    const BUILTIN_OPT_VALUES = new Set(['auto', 'default']);
     Array.from(sel.options).forEach(opt => {
-        if (opt.value !== 'default') sel.removeChild(opt);
+        if (!BUILTIN_OPT_VALUES.has(opt.value)) sel.removeChild(opt);
     });
     // Accept a pre-fetched plugins array (normal startup path reuses
     // loadPlugins' fetch). Fall back to our own fetch if called
@@ -953,15 +962,16 @@ async function _populateVizPicker(plugins) {
         }
     }
     const vizPlugins = plugins.filter(p => p && p.type === 'visualization');
-    // "default" is the reserved id for the built-in 2D renderer option
-    // already in the <select>. A plugin with id: "default" would collide
-    // with it — the restore-from-localStorage lookup would still find
-    // the built-in entry, dragging the plugin into never-selected land
-    // silently. Fail loudly instead.
-    const RESERVED_IDS = new Set(['default']);
+    // "default" is reserved for the built-in 2D renderer option and
+    // "auto" is reserved for the Auto-mode entry — both already in the
+    // <select>. A plugin with either id would collide: the
+    // restore-from-localStorage lookup would find the built-in entry,
+    // dragging the plugin into never-selected land silently. Fail
+    // loudly instead.
+    const RESERVED_IDS = new Set(['default', 'auto']);
     for (const p of vizPlugins) {
         if (RESERVED_IDS.has(p.id)) {
-            console.error(`viz picker: plugin id '${p.id}' is reserved for the built-in renderer; rename the plugin's id in plugin.json to include it in the picker.`);
+            console.error(`viz picker: plugin id '${p.id}' collides with a reserved built-in picker entry ('auto' = Auto mode, 'default' = built-in 2D highway); rename the plugin's id in plugin.json to include it in the picker.`);
             continue;
         }
         // Skip entries where the plugin script hasn't exposed a factory —
@@ -990,17 +1000,37 @@ async function _populateVizPicker(plugins) {
     const savedMatches = saved && Array.from(sel.options).some(opt => opt.value === saved);
     if (savedMatches) {
         sel.value = saved;
+        // 'default' needs no setViz — the highway already starts with
+        // the built-in renderer. 'auto' runs setViz so _autoMatchViz
+        // fires, though it's a no-op before the first song_info frame.
         if (saved !== 'default') setViz(saved);
     } else if (saved) {
         // Saved selection references an option that no longer exists —
         // plugin uninstalled since last session, renamed, or the plugin
         // script failed to register its factory this time. Clear the
         // stale value so we don't keep trying the same missing viz on
-        // every reload. The picker falls back to the built-in "default"
-        // option naturally.
+        // every reload, and fall through to the fresh-install default
+        // below.
         try { localStorage.removeItem('vizSelection'); }
         catch (_) { /* storage blocked; ignore */ }
+        saved = null;
     }
+    if (!saved) {
+        // Fresh install (or post-cleanup fallthrough): default to Auto
+        // so the arrangement-matching plugins (piano on Keys songs,
+        // drums on Drums songs, ...) take over without a manual pick.
+        // Users who actively selected 'default' keep 'default' —
+        // savedMatches above handles that.
+        sel.value = 'auto';
+        try { localStorage.setItem('vizSelection', 'auto'); } catch (_) {}
+    }
+    // Close a startup race: if playback began before loadPlugins
+    // finished, song:ready already fired while the picker had no
+    // plugin options — _autoMatchViz saw no candidates and left the
+    // default active. Now that plugins are registered, re-evaluate
+    // against whatever song is currently loaded (a no-op when no song
+    // has been loaded yet, since highway.getSongInfo() returns {}).
+    if (sel.value === 'auto') _autoMatchViz();
 }
 
 function setViz(id) {
@@ -1019,6 +1049,11 @@ function setViz(id) {
     if (id === 'default' || !id) {
         try { localStorage.setItem('vizSelection', id || 'default'); } catch (_) {}
         highway.setRenderer(null);
+        return;
+    }
+    if (id === 'auto') {
+        try { localStorage.setItem('vizSelection', 'auto'); } catch (_) {}
+        _autoMatchViz();
         return;
     }
     const factory = window['slopsmithViz_' + id];
@@ -1045,6 +1080,78 @@ function setViz(id) {
     // Persist only once we know the renderer is valid.
     try { localStorage.setItem('vizSelection', id); } catch (_) {}
     highway.setRenderer(renderer);
+}
+
+// Auto mode: evaluate each registered viz factory's static
+// `matchesArrangement(songInfo)` predicate and install the first
+// matching renderer. No match → fall back to the built-in 2D highway.
+//
+// vizSelection stays 'auto' across invocations so the next song:ready
+// re-evaluates. An explicit picker choice overrides Auto by persisting
+// a different vizSelection.
+//
+// Enumerates viz plugins by walking the picker's own <option> list —
+// that's the canonical set built by _populateVizPicker above and keeps
+// us from needing a second module-level registry.
+function _autoMatchViz() {
+    const sel = document.getElementById('viz-picker');
+    if (!sel) return;
+    const songInfo = (typeof highway !== 'undefined' && typeof highway.getSongInfo === 'function')
+        ? (highway.getSongInfo() || {}) : {};
+    // Options are stable in DOM order, which matches what users see in
+    // the picker. The underlying order comes from /api/plugins →
+    // _populateVizPicker, and /api/plugins reflects the order the
+    // plugin loader discovered plugins in — plugins/__init__.py walks
+    // `sorted(plugins_base_dir.iterdir())`, i.e. sorted by the on-disk
+    // PLUGIN DIRECTORY name (e.g. "slopsmith-plugin-drums" sorts
+    // before "slopsmith-plugin-piano"), not by the plugin id declared
+    // in plugin.json. Two consequences worth noting:
+    //   1. First match wins among registered viz plugins — keep each
+    //      plugin's matchesArrangement predicate narrow to avoid
+    //      stealing songs from more specialized viz.
+    //   2. If you need a strict priority when multiple plugins match
+    //      the same song, name the higher-priority plugin's directory
+    //      earlier alphabetically. The picker dropdown reveals the
+    //      actual tiebreaker at a glance.
+    const candidateIds = Array.from(sel.options)
+        .map(o => o.value)
+        .filter(v => v !== 'auto' && v !== 'default');
+    for (const id of candidateIds) {
+        const factory = window['slopsmithViz_' + id];
+        if (typeof factory !== 'function') continue;
+        const predicate = factory.matchesArrangement;
+        if (typeof predicate !== 'function') continue;
+        let matched = false;
+        try { matched = !!predicate(songInfo); }
+        catch (err) {
+            console.error(`viz auto: matchesArrangement for ${id} threw`, err);
+            continue;
+        }
+        if (!matched) continue;
+        let renderer;
+        try { renderer = factory(); }
+        catch (err) {
+            console.error(`viz auto: factory slopsmithViz_${id} threw`, err);
+            continue;
+        }
+        if (!renderer || typeof renderer.draw !== 'function') {
+            console.error(`viz auto: factory slopsmithViz_${id} returned an invalid renderer (missing draw)`);
+            continue;
+        }
+        // Deliberately NOT persisting id — vizSelection stays 'auto' so
+        // the next song:ready re-evaluates against the new arrangement.
+        highway.setRenderer(renderer);
+        return;
+    }
+    // No match — restore the built-in 2D highway. setRenderer(null) is
+    // a no-op when the default is already active. KNOWN LIMITATION:
+    // when the previous Auto pick was a WebGL renderer, the canvas has
+    // been locked to 'webgl' by that renderer's init; reverting to the
+    // default 2D renderer will fail silently (see CLAUDE.md "first
+    // context wins"). That's the same limitation manual picker swaps
+    // already have — a future wave will teach highway to recreate the
+    // canvas on context-type change.
+    highway.setRenderer(null);
 }
 
 function formatTime(s) { return `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`; }

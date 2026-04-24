@@ -309,6 +309,7 @@
             </select>
             <span id="viz-picker-label" class="text-xs text-gray-500 ml-1 sr-only">Visualization</span>
             <select id="viz-picker" onchange="setViz(this.value)" class="bg-dark-600 border border-gray-700 rounded-lg px-2 py-1.5 text-xs text-gray-300 outline-none" aria-labelledby="viz-picker-label" title="Visualization">
+                <option value="auto">Auto (match arrangement)</option>
                 <option value="default">Highway</option>
                 <!-- Additional entries populated on load from /api/plugins (slopsmith#36) -->
             </select>

@@ -67,9 +67,14 @@ All fields except `id` and `name` are optional. Plugins can have any combination
 
 ## Plugin Best Practices
 
-### Visualization plugins — two complementary contracts
+### Visualization plugins — three complementary contracts
 
-Slopsmith supports two ways for a plugin to provide a visualization. They coexist; new plugins should prefer the setRenderer contract where it fits.
+Slopsmith supports three ways for a plugin to participate in the main player's visuals. They coexist; new plugins should prefer the setRenderer contract where it fits.
+
+**Pick the right shape:**
+- Replacing the whole highway drawing? → **setRenderer** (section 1). Enters the viz picker.
+- Adding a layer on top of whichever viz is active? → **Overlay** (section 2). Navbar toggle, not in the picker.
+- Spawning a fully standalone pane (own WebSocket, independent lifecycle)? → **Standalone pane** (section 3). Used by splitscreen today.
 
 #### 1. setRenderer contract (slopsmith#36) — preferred
 
@@ -130,7 +135,47 @@ Selecting this plugin in the main-player viz picker (or, after Wave C, in splits
 - `draw(bundle)` receives difficulty-filtered arrays — never read from `_filteredNotes` or other internals.
 - `_drawHooks` fire only for the default 2D renderer. Custom renderers handling their own compositing should not expect them.
 
-#### 2. Standalone pane contract — used by splitscreen today
+**Auto mode — `matchesArrangement(songInfo)` (optional).**
+
+The viz picker prepends an "Auto (match arrangement)" entry that is the default selection on fresh installs. When Auto is active, core evaluates registered viz factories on every `song:ready` and swaps the renderer to the first factory whose `matchesArrangement(songInfo)` predicate returns truthy. No match → the built-in 2D highway.
+
+Declare the predicate as a static on the factory (not the instance) so core can evaluate it without constructing a throwaway renderer:
+
+```js
+window.slopsmithViz_piano = function () { /* ... */ };
+window.slopsmithViz_piano.matchesArrangement = function (songInfo) {
+    return /keys|piano|synth/i.test((songInfo && songInfo.arrangement) || '');
+};
+```
+
+- `songInfo` is the highway's live song_info snapshot — `arrangement`, `tuning`, `capo`, `arrangement_index`, `filename`, `artist`, `title`, etc. May be `{}` before the first song loads.
+- Factories without `matchesArrangement` are skipped during auto-selection — the correct default for arrangement-agnostic viz (tabview, jumpingtab) that only make sense as manual picks.
+- Explicit picker selections override Auto and are persisted to `localStorage.vizSelection`, so the pinned choice survives page reloads until the user switches back to "Auto" (which also persists). Picking "Auto" re-evaluates against the current song immediately. In contexts where `localStorage` is unavailable (private mode, sandboxed iframes, some test runners) persistence falls back to the current picker `<option>` value, which still overrides Auto for as long as the page stays loaded.
+- When an Auto-selected renderer fails and core emits `viz:reverted`, the picker falls back to the built-in default and disables auto-switching until the user re-selects Auto.
+- First match wins (picker order), so the registration order of plugins is the tiebreaker. Keep predicates narrow to avoid stealing songs from more specialized viz.
+
+**Known limitation — WebGL viz in Auto mode.** Auto's evaluation happens on `song:ready`, which fires AFTER `highway.init()` has already given the canvas to the default 2D renderer. Installing a WebGL viz at that point fails because the canvas is locked to 2D (see the "first context wins" caveat above). Conversely, reverting from a WebGL-active Auto pick to the default 2D on a no-match song will silently blank the player. Both cases are the same canvas-lock limitation manual picker swaps already have. A future wave will teach highway to recreate the canvas on context-type change. For now, WebGL viz should either be pinned explicitly via the picker (which stores the choice pre-`highway.init()` on reload) or skip `matchesArrangement`.
+
+#### 2. Overlay contract — for add-on layers
+
+Plugins that add a layer on top of whichever visualization is active — HUDs, fretboard diagrams, chord labels, practice feedback — don't replace the renderer. They manage their own canvas, their own rAF loop, and a toggle button somewhere visible (typically a navbar pill), reading public highway state via the getters:
+
+- `highway.getTime()` / `highway.getBeats()` — current playback position
+- `highway.getNotes()` / `highway.getChords()` — difficulty-filter-aware arrays
+- `highway.getSongInfo()` — tuning, arrangement, capo
+- `highway.getLefty()` / `highway.getInverted()` — mirror + invert state
+
+Overlays do NOT appear in the viz picker and do NOT declare `"type": "visualization"` in `plugin.json`. They coexist with whichever renderer (default 2D, 3D highway, piano, ...) the user has picked.
+
+**Key rules:**
+- **Own your rAF + canvas** — don't piggyback on `_drawHooks` (those only fire for the default 2D renderer) or on `createHighway`'s rendering context.
+- **Re-read state every frame** — overlay output must track whatever the current renderer is drawing. Don't cache note positions across frames.
+- **Respect lefty + invert toggles** — if the overlay depicts strings or frets, mirror using the same transforms the active renderer would.
+- **Clean up on toggle-off** — cancel rAF and remove/hide the overlay canvas so inactive overlays aren't wasting frames.
+
+Reference: [fretboard plugin](https://github.com/byrongamatos/slopsmith-plugin-fretboard) — canonical overlay implementation (navbar toggle, own canvas, 80ms active-note window).
+
+#### 3. Standalone pane contract — used by splitscreen today
 
 Plugins that want to be their own fully self-contained pane (own WebSocket, own canvas, own rAF loop) — the model splitscreen uses for Tab view and similar — export a factory on `window.createMyVisualization`:
 
@@ -160,7 +205,7 @@ Reference implementations:
 - **Lyrics pane** — `createLyricsPane()` in splitscreen's screen.js (DOM-based, simplest example)
 - **Jumping Tab** — `window.createJumpingTabPane()` in the [Jumping Tab plugin](https://github.com/renanboni/slopsmith-plugin-jumpingtab) (canvas-based with context-swap)
 
-**Why both?** setRenderer plugs into an existing highway, reusing its WebSocket and data parsing — zero boilerplate for the common "I want a different look for the same data" case. The pane contract is for panels that need their own lifecycle (e.g. Tab view fetches GP5 separately, has no highway data) or for splitscreen's per-panel setup today. A future wave will unify: splitscreen will use setRenderer on its per-panel highway instances, and the pane contract will become the minority path for truly data-independent viz.
+**Why three?** setRenderer plugs into an existing highway, reusing its WebSocket and data parsing — zero boilerplate for the common "I want a different look for the same data" case. Overlays compose with whatever renderer is active — they decorate rather than replace, so multiple can stack (fretboard + chord labels + practice feedback) without fighting over the canvas. The pane contract is for panels that need their own lifecycle (e.g. Tab view fetches GP5 separately, has no highway data) or for splitscreen's per-panel setup today. A future wave will unify: splitscreen will use setRenderer on its per-panel highway instances, and the pane contract will become the minority path for truly data-independent viz.
 
 ### General plugin guidelines
 
