@@ -426,6 +426,12 @@ git clone https://github.com/byrongamatos/slopsmith-plugin-ug.git ultimate_guita
 docker compose restart
 ```
 
+## Documentation
+
+- [Sloppak format — developer guide](docs/sloppak-spec.md) — schema, wire format, and how to extend the format with new data types
+- [Sloppak hand-editing — user guide](docs/sloppak-hand-editing.md) — record your own stem, fix metadata, swap cover art
+- [Diagnostics bundle spec](docs/diagnostics-bundle-spec.md) — layout and per-file schemas of the Export Diagnostics bundle
+
 ## AI Agent Guide
 
 This repo includes a [`CLAUDE.md`](CLAUDE.md) file with architecture overview, plugin conventions, and best practices for AI coding agents (Claude Code, etc.). If you're using AI tools to contribute, the guide is picked up automatically. If you're updating conventions or patterns, please keep `CLAUDE.md` in sync.
