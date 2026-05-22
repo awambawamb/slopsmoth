@@ -258,6 +258,7 @@
                         <div>
                             <label class="text-sm font-medium text-gray-400 mb-2 block">Default Arrangement</label>
                             <select id="default-arrangement"
+                                onchange="persistSetting('default_arrangement', this.value)"
                                 class="bg-dark-700 border border-gray-800 rounded-xl px-3 py-2.5 text-sm text-gray-300 outline-none">
                                 <option value="">Auto (most notes)</option>
                                 <option value="Lead">Lead</option>
@@ -277,6 +278,7 @@
                         <div>
                             <label class="text-sm font-medium text-gray-400 mb-2 block">PSARC Platform Filter</label>
                             <select id="psarc-platform"
+                                onchange="persistSetting('psarc_platform', this.value)"
                                 class="bg-dark-700 border border-gray-800 rounded-xl px-3 py-2.5 text-sm text-gray-300 outline-none">
                                 <option value="both">All files (PC + Mac)</option>
                                 <option value="pc">PC only (_p.psarc)</option>

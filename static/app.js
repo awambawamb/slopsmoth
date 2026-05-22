@@ -2052,6 +2052,42 @@ async function saveSettings() {
     document.getElementById('settings-status').textContent = data.message || data.error;
 }
 
+// Persist a single settings field the instant a control changes (used by
+// the Settings dropdowns). The /api/settings POST handler merges only the
+// keys present in the body, so this one-field write won't clobber dlc_dir
+// or any other setting. No debounce: a <select> change event fires once
+// per selection, unlike the A/V / mastery sliders' per-pixel oninput.
+//
+// The Settings-dropdown autosaves run through one chain so their POSTs are
+// sent one at a time, in the order the user made the changes — the last
+// selection is always the last write, for both rapid changes to one
+// dropdown and back-to-back changes across different dropdowns. The A/V
+// and mastery slider autosaves POST directly (not through this chain);
+// the server-side config.json lock is what keeps those from racing the
+// dropdown writes (see save_settings() in server.py).
+let _settingSaveChain = Promise.resolve();
+function persistSetting(key, value) {
+    const next = _settingSaveChain.then(() => _postSetting(key, value));
+    // Swallow failures so one failed write doesn't poison the chain and
+    // block every later save.
+    _settingSaveChain = next.catch(() => {});
+    return next;
+}
+async function _postSetting(key, value) {
+    const status = document.getElementById('settings-status');
+    try {
+        const resp = await fetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ [key]: value }),
+        });
+        const data = await resp.json();
+        if (status) status.textContent = data.message || data.error || '';
+    } catch (e) {
+        if (status) status.textContent = 'Save failed: ' + e.message;
+    }
+}
+
 // ── Settings export / import (slopsmith#113) ─────────────────────────────────
 //
 // Bundles server config + every localStorage key + opted-in plugin server
