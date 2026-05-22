@@ -9069,20 +9069,63 @@
     }
 
     window.slopsmithViz_highway_3d = createFactory;
-    // Static metadata read by core (see static/highway.js + static/app.js):
-    //   contextType         — required canvas context type. highway.js
-    //                         replaces the <canvas> element when the
-    //                         requested type differs from the current one,
-    //                         so this renderer can be installed mid-session
-    //                         even if the canvas was previously bound to 2D.
-    //   matchesArrangement  — Auto-mode predicate. When the picker is on
-    //                         "Auto", core installs the first registered
-    //                         viz whose predicate returns truthy on the
-    //                         current song_info. Lead/Rhythm/Bass/Guitar
-    //                         arrangements route here; Keys arrangements
-    //                         are matched by the piano plugin instead.
-    //                         _canRun3D() in app.js still gates Auto from
-    //                         picking us on machines without WebGL2.
+    window.slopsmithViz_highway_3d.panelControls = [
+        {
+            key: 'palette',
+            label: 'Palette',
+            type: 'select',
+            default: BG_DEFAULTS.palette,
+            // Derived from PALETTE_IDS so the descriptor stays in sync when a
+            // palette is added/removed/renamed — PALETTES is the single
+            // source of truth. Label is the id with its first letter
+            // capitalized (matches the existing Default/Neon/Pastel names).
+            options: PALETTE_IDS.map((id) => ({
+                id,
+                label: id.charAt(0).toUpperCase() + id.slice(1),
+            })),
+        },
+        {
+            key: 'cameraSmoothing',
+            label: 'Camera smoothing (X-pan)',
+            type: 'range',
+            min: 0,
+            max: 1,
+            step: 0.05,
+            default: BG_DEFAULTS.cameraSmoothing,
+        },
+        {
+            key: 'cameraLockLow',
+            label: 'Lock camera at frets 1-12',
+            type: 'toggle',
+            default: BG_DEFAULTS.cameraLockLow,
+        },
+        {
+            key: 'cameraLockZoom',
+            label: 'Locked zoom (In ↔ Out)',
+            type: 'range',
+            min: 0,
+            max: 1,
+            step: 0.05,
+            default: BG_DEFAULTS.cameraLockZoom,
+        },
+    ];
+    // Static metadata exposed on the factory:
+    //   panelControls      - optional, host-readable descriptors for a
+    //                        curated per-panel control surface. Renderer
+    //                        values still flow through _bgLoadSettings().
+    //   contextType        - required canvas context type. highway.js
+    //                        replaces the <canvas> element when the
+    //                        requested type differs from the current one,
+    //                        so this renderer can be installed mid-session
+    //                        even if the canvas was previously bound to 2D.
+    //   matchesArrangement - Auto-mode predicate. When the picker is on
+    //                        "Auto", core installs the first registered
+    //                        viz whose predicate returns truthy on the
+    //                        current song_info. Lead/Rhythm/Bass/Guitar
+    //                        arrangements route here; Keys arrangements
+    //                        are matched by the piano plugin instead.
+    //                        _canRun3D() in app.js still gates Auto from
+    //                        picking us on machines without WebGL2.
     window.slopsmithViz_highway_3d.contextType = 'webgl2';
     // Canonical guitar arrangement names (server.py: _ALLOWED_ARRANGEMENT_NAMES)
     // are Lead / Rhythm / Bass / Combo. `guitar` is included as a safety
