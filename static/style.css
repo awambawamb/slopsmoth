@@ -524,12 +524,16 @@ html { scroll-behavior: smooth; }
 
 .slider-input::-webkit-slider-thumb {
   -webkit-appearance: none;
-  height: 0px;
-  width: 0px;
+  height: 22px;
+  width: 8px;
   background: #ffffff;
-  border-radius: 0px;
-  margin-top: 9px;
+  border-radius: 4px;
+  margin-top: 1px;
+  cursor: grab;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.4);
 }
+
+.slider-input::-webkit-slider-thumb:active { cursor: grabbing; }
 
 /* --- Firefox --- */
 .slider-input::-moz-range-track {
@@ -540,10 +544,14 @@ html { scroll-behavior: smooth; }
 }
 
 .slider-input::-moz-range-thumb {
-  height: 0px;
-  width: 0px;
+  height: 22px;
+  width: 8px;
   background: #ffffff;
-  border-radius: 0px;
+  border-radius: 4px;
   border: 0;
+  cursor: grab;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.4);
 }
+
+.slider-input::-moz-range-thumb:active { cursor: grabbing; }
 /* ////// end sliders /////// */
