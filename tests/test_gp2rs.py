@@ -735,14 +735,14 @@ def test_piano_tied_chord_both_notes_extended():
     """Two simultaneous piano notes in the same rs_string bucket must each get
     their own sustain extension — not share a single string-keyed slot."""
     # Beat 1: chord of MIDI 48 (gp_str=1) and MIDI 50 (gp_str=2), both 0.5 s
-    n_c4 = _ct_note(guitarpro.NoteType.normal, gp_string=1, fret=0)
-    n_d4 = _ct_note(guitarpro.NoteType.normal, gp_string=2, fret=0)
-    beat1 = _ct_beat(tick=0, dur_value=4, notes=[n_c4, n_d4])
+    n_c3 = _ct_note(guitarpro.NoteType.normal, gp_string=1, fret=0)
+    n_d3 = _ct_note(guitarpro.NoteType.normal, gp_string=2, fret=0)
+    beat1 = _ct_beat(tick=0, dur_value=4, notes=[n_c3, n_d3])
 
     # Beat 2: ties for both — should extend each note to ~1.0 s
-    t_c4 = _ct_note(guitarpro.NoteType.tie, gp_string=1, fret=0)
-    t_d4 = _ct_note(guitarpro.NoteType.tie, gp_string=2, fret=0)
-    beat2 = _ct_beat(tick=GP_TICKS_PER_QUARTER, dur_value=4, notes=[t_c4, t_d4])
+    t_c3 = _ct_note(guitarpro.NoteType.tie, gp_string=1, fret=0)
+    t_d3 = _ct_note(guitarpro.NoteType.tie, gp_string=2, fret=0)
+    beat2 = _ct_beat(tick=GP_TICKS_PER_QUARTER, dur_value=4, notes=[t_c3, t_d3])
 
     xml_str = convert_piano_track(_piano_song([beat1, beat2]), track_index=0)
     root = ET.fromstring(xml_str)
