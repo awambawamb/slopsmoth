@@ -2944,6 +2944,11 @@ const jucePlayer = {
         this._polling = false;
         if (this._timer) { clearTimeout(this._timer); this._timer = null; }
     },
+    setRate(rate) {
+        this._pos = this.currentTime;
+        this._pollAt = performance.now();
+        this._speed = rate;
+    },
     async stop() {
         await this.pause();
         this._pos = 0;
@@ -3819,18 +3824,13 @@ function setSpeed(v) {
         return;
     }
     if (window._juceMode) {
-        if (window.jucePlayer) { 
-            window.jucePlayer._pos = window.jucePlayer.currentTime;
-            window.jucePlayer._pollAt = performance.now();
-        }
-        window.slopsmithDesktop.audio.setBackingSpeed(rate);
-        if (window.jucePlayer) {
-            window.jucePlayer._speed = rate;
-        }
+        window.jucePlayer?.setRate(rate);
+        window.slopsmithDesktop?.audio?.setBackingSpeed(rate);
     } else {
         audio.playbackRate = rate;
     }
-    document.getElementById('speed-label').textContent = rate.toFixed(2) + 'x';
+    const speedLabel = document.getElementById('speed-label');
+    if (speedLabel) speedLabel.textContent = rate.toFixed(2) + 'x';
     handleSliderInput(speedSlider);
 }
 // Master-difficulty slider (slopsmith#48). Persists partial via
