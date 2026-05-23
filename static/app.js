@@ -2876,11 +2876,13 @@ const jucePlayer = {
     _dur: 0,
     _pollAt: 0,    // performance.now() when _pos was last set
     _polling: false,
+    _speed: 1,
     get currentTime() {
         if (!this._polling) return this._pos;
         // Interpolate between IPC polls so highway motion is smooth at 60fps
+        // Scale by _speed so at 0.7x the interpolated clock advances 0.7s/s
         const elapsed = (performance.now() - this._pollAt) / 1000;
-        return Math.min(this._pos + elapsed, this._dur > 0 ? this._dur : Infinity);
+        return Math.min(this._pos + elapsed * this._speed, this._dur > 0 ? this._dur : Infinity);
     },
     get duration() { return this._dur; },
     async play() {
@@ -2942,11 +2944,17 @@ const jucePlayer = {
         this._polling = false;
         if (this._timer) { clearTimeout(this._timer); this._timer = null; }
     },
+    setRate(rate) {
+        this._pos = this.currentTime;
+        this._pollAt = performance.now();
+        this._speed = rate;
+    },
     async stop() {
         await this.pause();
         this._pos = 0;
         this._dur = 0;
         this._pollAt = 0;
+        this._speed = 1;
     },
 };
 window.jucePlayer = jucePlayer;
@@ -3059,6 +3067,8 @@ window.jucePlayer = jucePlayer;
             }
             window._juceMode = true;
             window._juceAudioUrl = url;
+            const _spSlider = document.getElementById?.('speed-slider');
+            if (_spSlider) setSpeed(_spSlider.value / 100);
             audio.src = '';
             try {
                 const apply = window.slopsmith?.audio?.applySongVolume;
@@ -3119,6 +3129,8 @@ window.jucePlayer = jucePlayer;
             window._juceAudioUrl = null;
             audio.src = url;
             audio.load();
+            const _spSlider = document.getElementById?.('speed-slider');
+            if (_spSlider) setSpeed(_spSlider.value / 100);
             // Resume only AFTER the seek so playback starts at `pos`, not at 0
             // with an audible jump once metadata arrives.
             const resumeAtPos = () => {
@@ -3807,15 +3819,20 @@ async function seekBy(s) {
 }
 function setSpeed(v) {
     const speedSlider = document.getElementById('speed-slider');
-    if (window._juceMode) {
-        audio.playbackRate = 1.0;
-        speedSlider.value = 100;
-        document.getElementById('speed-label').textContent = '1.0x';
-        handleSliderInput(speedSlider);
+    const rate = Number(v);
+    if (!Number.isFinite(rate)) {
         return;
     }
-    audio.playbackRate = parseFloat(v);
-    document.getElementById('speed-label').textContent = parseFloat(v).toFixed(2) + 'x';
+    if (window._juceMode) {
+        window.jucePlayer?.setRate(rate);
+        Promise.resolve()
+            .then(() => window.slopsmithDesktop?.audio?.setBackingSpeed(rate))
+            .catch(err => console.warn('[setSpeed] setBackingSpeed failed:', err));
+    } else {
+        audio.playbackRate = rate;
+    }
+    const speedLabel = document.getElementById('speed-label');
+    if (speedLabel) speedLabel.textContent = rate.toFixed(2) + 'x';
     handleSliderInput(speedSlider);
 }
 // Master-difficulty slider (slopsmith#48). Persists partial via
