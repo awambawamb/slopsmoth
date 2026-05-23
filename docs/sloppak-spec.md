@@ -463,12 +463,14 @@ articulation is part of the piece-id.
 | `hh_closed` | cymbal | 42 | filled circle |
 | `hh_open` | cymbal | 46 | ring (outline) circle |
 | `hh_pedal` | cymbal | 44 | small circle with × |
+| `stack` | cymbal | 30 | jagged circle (no GM standard — reuses 30 from extended-percussion range) |
 | `crash_l` | cymbal | 49 | circle |
 | `crash_r` | cymbal | 57 | circle |
 | `splash` | cymbal | 55 | small circle |
 | `china` | cymbal | 52 | jagged circle |
 | `ride` | cymbal | 51, 59 | circle |
 | `ride_bell` | cymbal | 53 | circle with centre dot |
+| `bell` | cymbal | 80 | circle with centre dot (no GM standard — reuses "Mute Triangle") |
 
 Unknown piece-ids round-trip through the loader (forward-compat); the
 client just renders them as a default rectangle.
