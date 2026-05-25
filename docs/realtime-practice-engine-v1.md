@@ -72,4 +72,11 @@ Locked in `slopsmith-desktop` — **Musician Practice Profile V1**:
 
 ## Milestone
 
-Tag: **`v1-realtime-practice-engine`** (paired with `slopsmith-desktop`).
+- Tag: **`v1-realtime-practice-engine`**
+- Paired desktop commit: same tag in `slopsmith-desktop`
+- Full spec (native): `slopsmith-desktop/docs/realtime-practice-engine-v1.md`
+
+## What ships next (V1.1+)
+
+Loop markers, A/B repeat, saved practice sections, count-in, and transport polish —
+built **on top of** this locked slowdown layer (see `docs/loop-section-practice-plan.md`).
