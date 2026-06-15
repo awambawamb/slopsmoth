@@ -424,7 +424,7 @@ def test_psarc_platform_null_is_noop(client, tmp_path):
     assert cfg["master_difficulty"] == 50
 
 
-# ── psarc_platform scan filtering ────────────────────────────────────────────
+# ── library scan (sloppak) ────────────────────────────────────────────────────
 
 @pytest.fixture()
 def scan_module(tmp_path, monkeypatch, isolate_logging):
@@ -439,46 +439,24 @@ def scan_module(tmp_path, monkeypatch, isolate_logging):
         conn.close()
 
 
-def _make_psarcs(dlc_dir, names):
-    """Create empty .psarc stub files and return Path objects."""
+def _make_sloppaks(dlc_dir, names):
+    """Create minimal zip-form .sloppak files and return Path objects."""
+    import zipfile
     paths = []
     for name in names:
         p = dlc_dir / name
-        p.write_bytes(b"")
+        with zipfile.ZipFile(p, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("manifest.yaml", "title: test\n")
         paths.append(p)
     return paths
 
 
-def test_scan_platform_both_includes_all(tmp_path, scan_module):
-    """With psarc_platform='both', _background_scan includes _p and _m files."""
+def test_scan_includes_sloppak_files(tmp_path, scan_module):
+    """_background_scan discovers .sloppak files in the DLC folder."""
     dlc = tmp_path / "dlc"
     dlc.mkdir()
-    _make_psarcs(dlc, ["song_p.psarc", "song_m.psarc"])
-    (tmp_path / "config.json").write_text(json.dumps({
-        "dlc_dir": str(dlc),
-        "psarc_platform": "both",
-    }))
-
-    import unittest.mock as mock
-    with mock.patch.object(scan_module, "_extract_meta_for_file",
-                           new=lambda f: {"title": f.name, "artist": "", "album": ""}):
-        scan_module._background_scan()
-
-    # Both files should appear in the DB
-    all_keys = {r[0] for r in scan_module.meta_db.conn.execute("SELECT filename FROM songs").fetchall()}
-    assert "song_p.psarc" in all_keys
-    assert "song_m.psarc" in all_keys
-
-
-def test_scan_platform_pc_excludes_mac_files(tmp_path, scan_module):
-    """With psarc_platform='pc', _background_scan excludes _m.psarc files."""
-    dlc = tmp_path / "dlc"
-    dlc.mkdir()
-    _make_psarcs(dlc, ["song_p.psarc", "song_m.psarc"])
-    (tmp_path / "config.json").write_text(json.dumps({
-        "dlc_dir": str(dlc),
-        "psarc_platform": "pc",
-    }))
+    _make_sloppaks(dlc, ["song_a.sloppak", "song_b.sloppak"])
+    (tmp_path / "config.json").write_text(json.dumps({"dlc_dir": str(dlc)}))
 
     import unittest.mock as mock
     with mock.patch.object(scan_module, "_extract_meta_for_file",
@@ -486,28 +464,21 @@ def test_scan_platform_pc_excludes_mac_files(tmp_path, scan_module):
         scan_module._background_scan()
 
     all_keys = {r[0] for r in scan_module.meta_db.conn.execute("SELECT filename FROM songs").fetchall()}
-    assert "song_p.psarc" in all_keys
-    assert "song_m.psarc" not in all_keys
+    assert "song_a.sloppak" in all_keys
+    assert "song_b.sloppak" in all_keys
 
 
-def test_scan_platform_mac_excludes_pc_files(tmp_path, scan_module):
-    """With psarc_platform='mac', _background_scan excludes _p.psarc files."""
+def test_scan_ignores_psarc_files(tmp_path, scan_module):
+    """PSARC files are not indexed by the library scanner."""
     dlc = tmp_path / "dlc"
     dlc.mkdir()
-    _make_psarcs(dlc, ["song_p.psarc", "song_m.psarc"])
-    (tmp_path / "config.json").write_text(json.dumps({
-        "dlc_dir": str(dlc),
-        "psarc_platform": "mac",
-    }))
+    (dlc / "legacy.psarc").write_bytes(b"")
+    (tmp_path / "config.json").write_text(json.dumps({"dlc_dir": str(dlc)}))
 
-    import unittest.mock as mock
-    with mock.patch.object(scan_module, "_extract_meta_for_file",
-                           new=lambda f: {"title": f.name, "artist": "", "album": ""}):
-        scan_module._background_scan()
+    scan_module._background_scan()
 
     all_keys = {r[0] for r in scan_module.meta_db.conn.execute("SELECT filename FROM songs").fetchall()}
-    assert "song_m.psarc" in all_keys
-    assert "song_p.psarc" not in all_keys
+    assert all_keys == set()
 
 
 # ── is_first_scan flag ───────────────────────────────────────────────────────
@@ -516,7 +487,7 @@ def test_is_first_scan_true_when_all_songs_unscanned(tmp_path, scan_module):
     """is_first_scan is True when every discovered song needs scanning."""
     dlc = tmp_path / "dlc"
     dlc.mkdir()
-    _make_psarcs(dlc, ["song_a.psarc", "song_b.psarc"])
+    _make_sloppaks(dlc, ["song_a.sloppak", "song_b.sloppak"])
     (tmp_path / "config.json").write_text(json.dumps({"dlc_dir": str(dlc)}))
 
     captured_status = {}
@@ -539,13 +510,13 @@ def test_is_first_scan_false_when_some_songs_cached(tmp_path, scan_module):
     """is_first_scan is False when only a subset of discovered songs need scanning."""
     dlc = tmp_path / "dlc"
     dlc.mkdir()
-    files = _make_psarcs(dlc, ["song_a.psarc", "song_b.psarc"])
+    files = _make_sloppaks(dlc, ["song_a.sloppak", "song_b.sloppak"])
     (tmp_path / "config.json").write_text(json.dumps({"dlc_dir": str(dlc)}))
 
     # Pre-populate the DB with song_a so only song_b needs scanning.
     stat_a = files[0].stat()
     scan_module.meta_db.put(
-        "song_a.psarc", stat_a.st_mtime, stat_a.st_size,
+        "song_a.sloppak", stat_a.st_mtime, stat_a.st_size,
         {"title": "Song A", "artist": "", "album": ""},
     )
 

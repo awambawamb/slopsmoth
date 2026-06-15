@@ -1,10 +1,7 @@
-"""PSARC → sloppak conversion + stem splitting.
+"""Sloppak stem splitting and open-format conversion helpers.
 
-This module is the single source of truth for the convert + split pipelines.
-Both the CLI scripts (`scripts/psarc_to_sloppak.py`, `scripts/split_stems.py`)
-and the in-app converter plugin (`plugins/sloppak_converter`) import from
-here — see the plugin's `routes.py` for the job queue that wraps these
-functions with progress reporting.
+This module is the single source of truth for the split pipeline.
+The CLI script `scripts/split_stems.py` imports from here.
 
 Each function accepts a `progress_cb(fraction: float, stage: str, message: str)`
 callback that the job queue forwards to the client over a WebSocket.
@@ -29,7 +26,6 @@ log = logging.getLogger("slopsmith.lib.sloppak_convert")
 
 import yaml
 
-from patcher import unpack_psarc
 from sloppak import _unpack_zip as _unpack_sloppak_zip
 from song import load_song, arrangement_to_wire
 from tones import extract_tones_for_song
@@ -114,16 +110,6 @@ def _parse_lyrics(extracted_dir: Path) -> list[dict]:
             }
             for v in root.findall("vocal")
         ]
-    # Fall back to vocals SNG (official DLC ships SNG-only)
-    try:
-        from sng_vocals import parse_vocals_sng
-        for sng_path in sorted(extracted_dir.rglob("*vocals*.sng")):
-            plat = "mac" if "/macos/" in str(sng_path).replace("\\", "/").lower() else "pc"
-            lyrics = parse_vocals_sng(str(sng_path), plat)
-            if lyrics:
-                return lyrics
-    except ImportError:
-        pass
     return []
 
 
@@ -338,7 +324,7 @@ def _remove_path(p: Path) -> None:
         p.unlink(missing_ok=True)
 
 
-# ── PSARC → sloppak ───────────────────────────────────────────────────────────
+# ── PSARC → sloppak (disabled) ────────────────────────────────────────────────
 
 def convert_psarc_to_sloppak(
     psarc_path: Path,
@@ -346,172 +332,8 @@ def convert_psarc_to_sloppak(
     as_dir: bool = False,
     progress_cb: ProgressCB = None,
 ) -> Path:
-    """Convert a PSARC to a .sloppak (single-stem). Returns the output path."""
-    _progress(progress_cb, 0.02, "extracting", f"Unpacking {psarc_path.name}")
-    tmp_extract = Path(tempfile.mkdtemp(prefix="s2p_extract_"))
-    work_dir = Path(tempfile.mkdtemp(prefix="s2p_work_"))
-    try:
-        unpack_psarc(str(psarc_path), str(tmp_extract))
-
-        _progress(progress_cb, 0.15, "extracting", "Parsing song data")
-        song = load_song(str(tmp_extract))
-        if not song.arrangements:
-            raise RuntimeError("no playable arrangements found in PSARC")
-
-        # Lift tone data (gear definitions + in-song tone changes) out of the
-        # unpacked PSARC once — PSARCs keep tones in the manifest JSON /
-        # arrangement XML, neither of which survives into the sloppak, so
-        # without this the converted sloppak loses all tones. Done in one
-        # pass (not per arrangement) to avoid re-scanning the extracted tree.
-        try:
-            tones_by_arr = extract_tones_for_song(
-                tmp_extract, [a.name for a in song.arrangements]
-            )
-        except Exception as e:
-            log.warning("tone extraction failed: %s", e, exc_info=True)
-            tones_by_arr = {}
-
-        used_ids: set[str] = set()
-        arr_manifest: list[dict] = []
-        first = True
-        for arr in song.arrangements:
-            aid = _arrangement_id(arr.name, used_ids)
-            # Attach tones to the Arrangement so arrangement_to_wire owns the
-            # serialization (single source of truth for the wire schema).
-            arr.tones = tones_by_arr.get(arr.name)
-            wire = arrangement_to_wire(arr)
-            if first:
-                wire["beats"] = [
-                    {"time": round(b.time, 3), "measure": b.measure} for b in song.beats
-                ]
-                wire["sections"] = [
-                    {"name": s.name, "number": s.number, "time": round(s.start_time, 3)}
-                    for s in song.sections
-                ]
-                first = False
-            arr_file = work_dir / "arrangements" / f"{aid}.json"
-            arr_file.parent.mkdir(parents=True, exist_ok=True)
-            arr_file.write_text(json.dumps(wire, separators=(",", ":")), encoding="utf-8")
-            arr_manifest.append({
-                "id": aid,
-                "name": arr.name,
-                "file": f"arrangements/{aid}.json",
-                "tuning": list(arr.tuning),
-                "capo": arr.capo,
-            })
-
-        _progress(progress_cb, 0.35, "extracting", "Converting audio (WEM → OGG)")
-        wems = find_wem_files(str(tmp_extract))
-        if not wems:
-            raise RuntimeError("no WEM audio found in PSARC")
-        _wem_to_ogg(wems[0], work_dir / "stems" / "full.ogg")
-
-        stems_manifest = [{"id": "full", "file": "stems/full.ogg", "default": "on"}]
-
-        lyrics = _parse_lyrics(tmp_extract)
-        lyrics_rel = None
-        if lyrics:
-            (work_dir / "lyrics.json").write_text(
-                json.dumps(lyrics, separators=(",", ":")), encoding="utf-8"
-            )
-            lyrics_rel = "lyrics.json"
-
-        cover_rel = None
-        if _extract_cover(tmp_extract, work_dir / "cover.jpg"):
-            cover_rel = "cover.jpg"
-
-        manifest: dict = {
-            "title": song.title or psarc_path.stem,
-            "artist": song.artist or "",
-            "album": song.album or "",
-            "year": int(song.year or 0),
-            "duration": round(float(song.song_length or 0.0), 3),
-        }
-        if cover_rel:
-            manifest["cover"] = cover_rel
-        manifest["stems"] = stems_manifest
-        manifest["arrangements"] = arr_manifest
-        if lyrics_rel:
-            manifest["lyrics"] = lyrics_rel
-        (work_dir / "manifest.yaml").write_text(
-            yaml.safe_dump(manifest, sort_keys=False, allow_unicode=True),
-            encoding="utf-8",
-        )
-
-        _progress(progress_cb, 0.85, "packing", "Writing output")
-        # Atomic write: build the output at a sibling `.tmp` path first,
-        # then move/rename onto `out_path`. Without this, a kill mid-write
-        # leaves a partial / truncated `.sloppak` (or worse, a half-deleted
-        # dir-form output) on disk; the host's library scan keys off the
-        # filename, so the broken file shows up as a "real" sloppak until
-        # the next successful re-conversion overwrites it.
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_out = out_path.with_name(out_path.name + ".tmp")
-        # Pre-clean stale `.tmp` from a previously-killed convert.
-        # `_remove_path` handles either form, so a zip-form `.tmp` left
-        # behind by an earlier `as_dir=False` crash doesn't block a new
-        # `as_dir=True` stage (or vice versa).
-        _remove_path(tmp_out)
-        if as_dir:
-            shutil.copytree(work_dir, tmp_out)
-            # Directory rename-onto-existing isn't portable (`os.replace`
-            # raises on Windows when dst is a non-empty dir, and POSIX
-            # `rename(2)` only swaps empty dirs). Two-step swap via a
-            # `.old` sidecar so the failure window is bounded to one
-            # rename; on Windows the dst-exists case is still a brief
-            # absence rather than a partial dir.
-            backup = out_path.with_name(out_path.name + ".old")
-            # Backup slot may pre-exist as either file or dir — could
-            # be a leftover from a prior killed `as_dir=True` swap, or
-            # a stray file a user dropped there. Clear either form.
-            _remove_path(backup)
-            # `out_path` itself may pre-exist as either form (user
-            # reconverting `as_dir=True` over a previous zip-form
-            # sloppak, or vice versa). `rename` on a file works the
-            # same as on a dir, so no type sniff needed.
-            if out_path.exists():
-                out_path.rename(backup)
-            try:
-                tmp_out.rename(out_path)
-            except Exception:
-                if backup.exists():
-                    backup.rename(out_path)
-                raise
-            # Backup may itself be either form (we just renamed
-            # whatever was at out_path into it); use the helper.
-            _remove_path(backup)
-        else:
-            _zip_dir(work_dir, tmp_out)
-            # `os.replace` can swap file-onto-file atomically, but
-            # cannot replace a non-empty directory with a file (POSIX
-            # `rename(2)` returns ENOTDIR/EISDIR; Windows fails the
-            # same way). If `out_path` is a dir-form sloppak left from
-            # a prior `as_dir=True` convert, clear it first. The brief
-            # absence window between rmtree and os.replace mirrors the
-            # dir→dir swap path's bounded gap; without this the convert
-            # would crash and the user would have to manually delete
-            # the dir to recover.
-            if out_path.is_dir():
-                _remove_path(out_path)
-            os.replace(tmp_out, out_path)
-
-        _progress(progress_cb, 1.0, "done", f"Wrote {out_path.name}")
-        return out_path
-    finally:
-        shutil.rmtree(tmp_extract, ignore_errors=True)
-        shutil.rmtree(work_dir, ignore_errors=True)
-        # Clean up staging sidecars left behind if we bailed before the
-        # rename. The happy path already moved `.tmp` onto `out_path`
-        # and removed `.old`, so these are no-ops there. The `.old`
-        # leg matters specifically for kills after `out_path.rename(backup)`
-        # but before `tmp_out.rename(out_path)` in the `as_dir=True` path
-        # — without this, a stale `.old` dir accumulates next to the
-        # (re-created) `out_path` across crashes.
-        for sidecar in (
-            out_path.with_name(out_path.name + ".tmp"),
-            out_path.with_name(out_path.name + ".old"),
-        ):
-            _remove_path(sidecar)
+    """PSARC conversion is not supported — use user-supplied .sloppak files."""
+    raise NotImplementedError("Encrypted Rocksmith PSARC archives are not supported")
 
 
 # ── Stem splitting via Demucs ────────────────────────────────────────────────

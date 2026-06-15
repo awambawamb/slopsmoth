@@ -335,7 +335,7 @@ print(loaded.manifest)     # raw dict — read your custom keys here
 
 ### 4.2. Writing (Python, server-side)
 
-There's no general-purpose writer in `lib/` yet. The current writer lives in [lib/sloppak_convert.py](../lib/sloppak_convert.py) inside `convert_psarc_to_sloppak()` — it's the single source of truth for "how a sloppak gets built." If you need to write sloppaks from a new source, copy the structure of that function:
+There's no general-purpose sloppak writer in `lib/` yet. Use [lib/sloppak_convert.py](../lib/sloppak_convert.py) stem-splitting helpers and the arrangement wire format below as reference when building sloppaks from open sources.
 
 1. Build a `work_dir/` in temp.
 2. Write `arrangements/{id}.json` per arrangement using `arrangement_to_wire()`.

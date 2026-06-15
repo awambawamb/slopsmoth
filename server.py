@@ -22,7 +22,6 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 
-from psarc import unpack_psarc, read_psarc_entries
 from safepath import safe_join
 from song import (
     anchor_to_wire,
@@ -1068,94 +1067,8 @@ def _get_dlc_dir(cfg: dict | None = None) -> Path | None:
 # ── Background metadata scan ──────────────────────────────────────────────────
 
 def _extract_meta_fast(psarc_path: Path) -> dict:
-    """Extract metadata from a PSARC using in-memory reading (no disk I/O)."""
-    files = read_psarc_entries(str(psarc_path), ["*.json", "*.xml", "*vocals*.sng"])
-
-    title = artist = album = year = ""
-    duration = 0.0
-    tuning = "E Standard"
-    # Track the offsets for the tuning we ultimately keep so we can
-    # compute tuning_sort_key (#22) without re-deriving it from the
-    # name. Defaults to E Standard offsets.
-    tuning_offsets: list[int] = [0] * 6
-    _tuning_from_guitar = False
-    arrangements = []
-    has_lyrics = False
-    arr_index = 0
-
-    # Parse manifest JSONs for metadata + arrangement info
-    for path, data in sorted(files.items()):
-        if not path.lower().endswith(".json"):
-            continue
-        try:
-            jdata = json.loads(data)
-            entries = jdata.get("Entries") or {}
-            for k, v in entries.items():
-                attrs = v.get("Attributes") or {}
-                arr_name = attrs.get("ArrangementName", "")
-                if arr_name in ("Vocals", "ShowLights", "JVocals"):
-                    continue
-                if not title:
-                    title = attrs.get("SongName", "")
-                    artist = attrs.get("ArtistName", "")
-                    album = attrs.get("AlbumName", "")
-                    yr = attrs.get("SongYear")
-                    year = str(yr) if yr else ""
-                    sl = attrs.get("SongLength")
-                    if sl:
-                        try: duration = float(sl)
-                        except (ValueError, TypeError): pass
-                if arr_name:
-                    # Get tuning - prefer guitar arrangements over bass
-                    tun = attrs.get("Tuning")
-                    if tun and isinstance(tun, dict):
-                        offsets = [tun.get(f"string{i}", 0) for i in range(6)]
-                        tun_name = tuning_name(offsets)
-                        is_guitar = arr_name in ("Lead", "Rhythm", "Combo")
-                        if tuning == "E Standard" or (is_guitar and not _tuning_from_guitar):
-                            tuning = tun_name
-                            tuning_offsets = offsets
-                            if is_guitar:
-                                _tuning_from_guitar = True
-                    notes = attrs.get("NotesHard", 0) or attrs.get("NotesMedium", 0) or 0
-                    arrangements.append({"index": arr_index, "name": arr_name, "notes": notes})
-                    arr_index += 1
-        except Exception:
-            continue
-
-    # Check XMLs for vocals (CDLC), or fall back to vocals SNG (official DLC)
-    for path, data in files.items():
-        if path.lower().endswith(".xml"):
-            try:
-                root = ET.fromstring(data)
-                if root.tag == "vocals":
-                    has_lyrics = True
-                    break
-            except Exception:
-                continue
-        elif path.lower().endswith(".sng") and "vocals" in path.lower():
-            has_lyrics = True
-            break
-
-    # Sort arrangements: Lead > Combo > Rhythm > Bass
-    priority = {"Lead": 0, "Combo": 1, "Rhythm": 2, "Bass": 3}
-    arrangements.sort(key=lambda a: priority.get(a["name"], 99))
-    for i, a in enumerate(arrangements):
-        a["index"] = i
-
-    return {
-        "title": title, "artist": artist, "album": album, "year": year,
-        "duration": duration, "tuning": tuning,
-        "arrangements": arrangements, "has_lyrics": has_lyrics,
-        # PSARCs have no stems; emit an empty list so the column round-
-        # trips uniformly with sloppaks (slopsmith#129).
-        "stem_ids": [],
-        # Cached tuning fields (slopsmith#22 / #69). The text `tuning`
-        # column above stays the source of truth for display; these are
-        # the indexable / filterable forms.
-        "tuning_name": tuning,
-        "tuning_sort_key": sum(tuning_offsets),
-    }
+    """PSARC metadata extraction is not supported."""
+    raise ValueError("Encrypted Rocksmith PSARC archives are not supported")
 
 
 def _extract_meta_sloppak(path: Path) -> dict:
@@ -1283,54 +1196,14 @@ def _extract_meta_loosefolder(path: Path) -> dict:
 
 
 def _extract_meta_for_file(psarc_path: Path) -> dict:
-    """Extract metadata — dispatches on extension; PSARC path tries fast then falls back."""
-    # Sloppak is detected by `.sloppak` suffix only (cheap), so check it
-    # first — that way a user's loose folder named `foo.sloppak` still wins
-    # the sloppak branch instead of being misclassified.
+    """Extract metadata — dispatches on extension (sloppak / loose folder only)."""
     if sloppak_mod.is_sloppak(psarc_path):
         return _extract_meta_sloppak(psarc_path)
     if loosefolder_mod.is_loose_song(psarc_path):
         return _extract_meta_loosefolder(psarc_path)
-    try:
-        meta = _extract_meta_fast(psarc_path)
-        if meta["title"]:
-            return meta
-    except Exception:
-        pass
-    # Fallback: full extraction (handles SNG-only official DLC etc.)
-    tmp = tempfile.mkdtemp(prefix="rs_scan_")
-    try:
-        unpack_psarc(str(psarc_path), tmp)
-        song = load_song(tmp)
-        tuning = "E Standard"
-        tuning_offsets: list[int] = [0] * 6
-        if song.arrangements and song.arrangements[0].tuning:
-            tuning_offsets = list(song.arrangements[0].tuning)
-            tuning = tuning_name(tuning_offsets)
-        arrangements = [
-            {"index": i, "name": a.name,
-             "notes": len(a.notes) + sum(len(c.notes) for c in a.chords)}
-            for i, a in enumerate(song.arrangements)
-        ]
-        has_lyrics = False
-        for xf in Path(tmp).rglob("*.xml"):
-            try:
-                if ET.parse(str(xf)).getroot().tag == "vocals":
-                    has_lyrics = True
-                    break
-            except Exception:
-                pass
-        return {
-            "title": song.title, "artist": song.artist,
-            "album": song.album, "year": str(song.year) if song.year else "",
-            "duration": song.song_length, "tuning": tuning,
-            "arrangements": arrangements, "has_lyrics": has_lyrics,
-            "stem_ids": [],
-            "tuning_name": tuning,
-            "tuning_sort_key": sum(tuning_offsets),
-        }
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+    if psarc_path.suffix.lower() == ".psarc":
+        raise ValueError("Encrypted Rocksmith PSARC archives are not supported")
+    raise ValueError(f"Unsupported song format: {psarc_path}")
 
 
 _SCAN_STATUS_INIT = {"running": False, "stage": "idle", "total": 0, "done": 0, "current": "", "error": None, "is_first_scan": False}
@@ -1428,19 +1301,6 @@ def _background_scan():
     # path isn't shared. Report the failure explicitly rather than silently
     # appearing to scan nothing.
     try:
-        # Skip RS1 compatibility mega-PSARCs (multi-song, not individually playable)
-        psarcs = [f for f in sorted(dlc.rglob("*.psarc"))
-                  if f.is_file()
-                  and "rs1compatibility" not in f.name.lower()]
-        # Filter by platform suffix (_p.psarc = PC, _m.psarc = Mac) when the
-        # user's DLC folder contains both variants of every song (e.g. a shared
-        # Steam library between Windows and Mac).
-        _platform = _cfg.get("psarc_platform", "both")
-        if _platform == "pc":
-            psarcs = [f for f in psarcs if not f.stem.endswith("_m")]
-        elif _platform == "mac":
-            psarcs = [f for f in psarcs if not f.stem.endswith("_p")]
-        # Sloppaks: match both file (zip) and directory form by suffix.
         sloppaks = [f for f in sorted(dlc.rglob("*.sloppak"))
                     if sloppak_mod.is_sloppak(f)]
 
@@ -1473,9 +1333,9 @@ def _background_scan():
         _scan_status = {**_SCAN_STATUS_INIT, "running": True, "stage": "error", "error": f"Unable to list {dlc}: {e}"}
         return
 
-    all_songs = psarcs + sloppaks + loose_songs
-    log.info("Scan: listed %d PSARCs, %d sloppaks and %d loose folders in %s",
-             len(psarcs), len(sloppaks), len(loose_songs), dlc)
+    all_songs = sloppaks + loose_songs
+    log.info("Scan: listed %d sloppaks and %d loose folders in %s",
+             len(sloppaks), len(loose_songs), dlc)
 
     def _rel(f: Path) -> str:
         # Store the path relative to the DLC root so sub-folders (e.g.
@@ -1527,8 +1387,8 @@ def _background_scan():
     is_first_scan = bool(all_songs) and len(to_scan) == len(all_songs)
     _scan_status = {**_SCAN_STATUS_INIT, "running": True, "stage": "scanning", "total": len(to_scan),
                     "is_first_scan": is_first_scan}
-    log.info("Library: %d PSARCs + %d sloppaks + %d loose folders, %d cached, %d to scan",
-             len(psarcs), len(sloppaks), len(loose_songs), len(all_songs) - len(to_scan), len(to_scan))
+    log.info("Library: %d sloppaks + %d loose folders, %d cached, %d to scan",
+             len(sloppaks), len(loose_songs), len(all_songs) - len(to_scan), len(to_scan))
 
     def _scan_one(item):
         f, mtime, size = item
@@ -2135,7 +1995,7 @@ def trigger_full_rescan():
 
 # ── Song upload ───────────────────────────────────────────────────────────────
 
-_ALLOWED_SONG_EXTS = {".psarc", ".sloppak"}
+_ALLOWED_SONG_EXTS = {".sloppak"}
 _MAX_UPLOAD_BYTES = 1024 * 1024 * 1024  # 1 GB — covers sloppaks bundled with stems
 # Per-request batch cap. Lets a user drop a whole album of sloppaks at once
 # without giving a hostile client a 1000-file DoS surface via Starlette's
@@ -2232,7 +2092,7 @@ def _invalidate_song_caches(cache_key: str) -> None:
 
 @app.post("/api/songs/upload")
 async def upload_song(request: Request):
-    """Upload one or more .psarc / .sloppak files into the configured DLC folder.
+    """Upload one or more .sloppak files into the configured DLC folder.
 
     Multipart body with one or more ``file`` fields (up to ``_MAX_UPLOAD_FILES``
     per request). Query string:
@@ -2366,7 +2226,7 @@ async def _save_uploaded_song(upload: UploadFile, dlc: Path, overwrite: bool) ->
     suffix = Path(base).suffix.lower()
     if suffix not in _ALLOWED_SONG_EXTS:
         return {"status": "error", "filename": base,
-                "error": "Only .psarc and .sloppak files are accepted"}
+                "error": "Only .sloppak files are accepted"}
 
     dest = dlc / base
     if dest.exists():
@@ -2424,9 +2284,6 @@ async def _save_uploaded_song(upload: UploadFile, dlc: Path, overwrite: bool) ->
             if bytes_read == 0:
                 error_result = {"status": "error", "filename": base,
                                 "error": "Empty upload — file is 0 bytes"}
-            elif suffix == ".psarc" and head[:4] != b"PSAR":
-                error_result = {"status": "error", "filename": base,
-                                "error": "Not a valid PSARC file (wrong magic bytes)"}
             elif suffix == ".sloppak":
                 if head[:2] != b"PK":
                     error_result = {"status": "error", "filename": base,
@@ -2478,10 +2335,10 @@ async def _save_uploaded_song(upload: UploadFile, dlc: Path, overwrite: bool) ->
 def delete_song(filename: str):
     """Remove a song from the DLC folder and clear its cache entries.
 
-    Works for all three formats: ``.psarc`` files, ``.sloppak`` files
-    OR directories, and loose-folder songs (the directory containing the
-    chart). The path is resolved through ``_resolve_dlc_path`` so URL-encoded
-    ``..`` segments cannot escape the library root.
+    Works for sloppak files or directories and loose-folder songs (the
+    directory containing the chart). The path is resolved through
+    ``_resolve_dlc_path`` so URL-encoded ``..`` segments cannot escape
+    the library root.
     """
     dlc = _get_dlc_dir()
     if dlc is None:
@@ -2507,8 +2364,7 @@ def delete_song(filename: str):
     )
     if not (is_psarc or is_sloppak or is_loose):
         return JSONResponse(
-            {"error": "Not a song entry — only PSARC files, sloppaks, "
-                      "or loose-folder songs can be deleted"},
+            {"error": "Not a song entry — only sloppaks or loose-folder songs can be deleted"},
             status_code=400,
         )
 
@@ -2833,8 +2689,11 @@ def save_settings(data: dict):
         else:
             if Path(dlc_path).is_dir():
                 updates["dlc_dir"] = dlc_path
-                count = sum(1 for f in Path(dlc_path).iterdir() if f.suffix == ".psarc")
-                messages.append(f"DLC folder: {count} .psarc files found")
+                count = sum(
+                    1 for f in Path(dlc_path).rglob("*.sloppak")
+                    if sloppak_mod.is_sloppak(f)
+                )
+                messages.append(f"DLC folder: {count} .sloppak files found")
             else:
                 return {"error": f"DLC directory not found: {dlc_path}"}
 
@@ -3780,12 +3639,18 @@ async def ws_retune(websocket: WebSocket, filename: str, target: str = "E Standa
         await websocket.close()
         return
 
-    # Retune only operates on PSARC containers — sloppak is an open format
-    # and doesn't share the SNG/encryption pipeline retune.py depends on.
+    # Retune only operated on PSARC containers, which are no longer supported.
     if filename.lower().endswith(".sloppak") or sloppak_mod.is_sloppak(psarc_path):
         await websocket.send_json({"error": "Retune is not supported for .sloppak files"})
         await websocket.close()
         return
+    if psarc_path.suffix.lower() == ".psarc":
+        await websocket.send_json({"error": "Retune is not supported for encrypted PSARC archives"})
+        await websocket.close()
+        return
+    await websocket.send_json({"error": "Retune is not supported for this song format"})
+    await websocket.close()
+    return
 
     # Bounded queue: retune can emit many progress messages (one per WEM
     # file processed plus stage milestones), so 256 is a generous ceiling
@@ -3944,34 +3809,10 @@ async def get_song_art(filename: str):
                 return FileResponse(str(art_resolved), media_type=mt)
         return JSONResponse({"error": "no art"}, 404)
 
-    # Check cache first
-    art_cache = ART_CACHE_DIR
-    art_cache.mkdir(parents=True, exist_ok=True)
-    safe_name = filename.replace("/", "_").replace(" ", "_")
-    cached = art_cache / f"{safe_name}.png"
-    if cached.exists():
-        return FileResponse(str(cached), media_type="image/png")
-
-    def _extract_art():
-        tmp = tempfile.mkdtemp(prefix="rs_art_")
-        try:
-            unpack_psarc(str(psarc_path), tmp)
-            dds_files = sorted(Path(tmp).rglob("*.dds"), key=lambda p: p.stat().st_size, reverse=True)
-            if not dds_files:
-                return None
-            from PIL import Image
-            img = Image.open(dds_files[0]).convert("RGB")
-            img.save(str(cached), "PNG")
-            return str(cached)
-        except Exception:
-            return None
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
-
-    result = await asyncio.get_event_loop().run_in_executor(None, _extract_art)
-    if result:
-        return FileResponse(result, media_type="image/png")
-    return JSONResponse({"error": "no art"}, 404)
+    return JSONResponse(
+        {"error": "Album art extraction from encrypted PSARC archives is not supported"},
+        status_code=400,
+    )
 
 
 @app.post("/api/song/{filename:path}/meta")
@@ -4085,32 +3926,8 @@ _extract_cache_lock = threading.Lock()
 
 
 def _get_or_extract(filename, psarc_path):
-    """Return cached extraction or extract fresh."""
-    import time
-    with _extract_cache_lock:
-        cached = _extract_cache.get(filename)
-        if cached:
-            tmp, song, ts = cached
-            if Path(tmp).exists() and (time.time() - ts) < 300:  # 5 min cache
-                return tmp, song, False  # False = not new
-            else:
-                shutil.rmtree(tmp, ignore_errors=True)
-                del _extract_cache[filename]
-
-    tmp = tempfile.mkdtemp(prefix="rs_web_")
-    unpack_psarc(str(psarc_path), tmp)
-    song = load_song(tmp)
-
-    with _extract_cache_lock:
-        # Clean old entries if cache gets too big
-        if len(_extract_cache) > 10:
-            oldest = min(_extract_cache, key=lambda k: _extract_cache[k][2])
-            old_tmp = _extract_cache.pop(oldest)[0]
-            shutil.rmtree(old_tmp, ignore_errors=True)
-        import time as _t
-        _extract_cache[filename] = (tmp, song, _t.time())
-
-    return tmp, song, True  # True = freshly extracted
+    """PSARC extraction is not supported."""
+    raise ValueError("Encrypted Rocksmith PSARC archives are not supported")
 
 
 @app.get("/api/sloppak/{filename:path}/file/{rel_path:path}")
@@ -4214,9 +4031,11 @@ async def highway_ws(websocket: WebSocket, filename: str, arrangement: int = -1)
                 tmp = str(psarc_path)
                 owns_tmp = False
             else:
-                tmp, song, owns_tmp = await loop.run_in_executor(
-                    None, lambda: _ctx.run(_get_or_extract, filename, psarc_path)
-                )
+                await websocket.send_json({
+                    "error": "Encrypted Rocksmith PSARC archives are not supported. Use .sloppak files.",
+                })
+                await websocket.close()
+                return
         finally:
             _keepalive_active = False
             keepalive_task.cancel()
@@ -4507,22 +4326,6 @@ async def highway_ws(websocket: WebSocket, filename: str, arrangement: int = -1)
                             })
                         break
                 except Exception:
-                    pass
-            if not lyrics:
-                # SNG-only PSARC (official DLC) — decode vocals SNG directly.
-                # Loose folders don't ship SNGs so the loop is a no-op
-                # there; same flat-vs-recursive walker choice as XML.
-                try:
-                    from lib.sng_vocals import parse_vocals_sng
-                    for sng_path in sorted(_xml_walk("*vocals*.sng")):
-                        plat = "mac" if "/macos/" in str(sng_path).replace("\\", "/").lower() else "pc"
-                        try:
-                            lyrics = parse_vocals_sng(str(sng_path), plat)
-                        except Exception:
-                            lyrics = []
-                        if lyrics:
-                            break
-                except ImportError:
                     pass
         if lyrics:
             await websocket.send_json({"type": "lyrics", "data": lyrics})

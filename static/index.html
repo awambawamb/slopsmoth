@@ -70,7 +70,7 @@
 
     <!-- Hidden file input shared by the navbar "Upload" link. Kept at body
          level so it stays reachable regardless of which screen is active. -->
-    <input type="file" id="upload-songs-file" accept=".psarc,.sloppak" multiple class="hidden" onchange="uploadSongs(this.files); this.value=''">
+    <input type="file" id="upload-songs-file" accept=".sloppak" multiple class="hidden" onchange="uploadSongs(this.files); this.value=''">
 
     <!-- ══ HOME (Hero + Library) ══════════════════════════════════════════ -->
     <div id="home" class="screen active">
@@ -112,7 +112,6 @@
                     <select id="lib-format" onchange="sortLibrary()"
                         class="bg-dark-700 border border-gray-800 rounded-xl px-3 py-2.5 text-sm text-gray-300 outline-none" title="Filter by format">
                         <option value="">All formats</option>
-                        <option value="psarc">PSARC</option>
                         <option value="sloppak">Sloppak</option>
                         <option value="loose">Folder</option>
                     </select>
@@ -311,17 +310,6 @@
                                 oninput="setAvOffsetMs(this.value)"
                                 class="w-full slider-input">
                             <p class="text-xs text-gray-600 mt-1">Positive = audio plays ahead of visual notes; raise this value to catch the highway up. Adjust live with the [ and ] keys (Shift for ±50 ms). Auto-saves on every change.</p>
-                        </div>
-                        <div>
-                            <label class="text-sm font-medium text-gray-400 mb-2 block">PSARC Platform Filter</label>
-                            <select id="psarc-platform"
-                                onchange="persistSetting('psarc_platform', this.value)"
-                                class="bg-dark-700 border border-gray-800 rounded-xl px-3 py-2.5 text-sm text-gray-300 outline-none">
-                                <option value="both">All files (PC + Mac)</option>
-                                <option value="pc">PC only (_p.psarc)</option>
-                                <option value="mac">Mac only (_m.psarc)</option>
-                            </select>
-                            <p class="text-xs text-gray-600 mt-1">Removes duplicate entries when your DLC folder contains both _p.psarc (PC) and _m.psarc (Mac) variants of the same song.</p>
                         </div>
                         <div>
                             <label for="demucs-server-url" class="text-sm font-medium text-gray-400 mb-2 block">Demucs Server (for stem separation)</label>

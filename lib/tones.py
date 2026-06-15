@@ -248,7 +248,7 @@ def _scan(extracted_dir: Path) -> tuple[list[Path], list[Path]]:
 def extract_arrangement_tones(extracted_dir, arr_name: str) -> dict | None:
     """Extract the tone block for one arrangement from an unpacked PSARC.
 
-    ``extracted_dir`` is a directory produced by ``unpack_psarc``; ``arr_name``
+    ``extracted_dir`` is a directory containing arrangement XML/JSON; ``arr_name``
     is the resolved arrangement name (e.g. ``"Lead"``) as produced by
     ``song.load_song``.
 

@@ -18,9 +18,9 @@ def _extract_year(song: guitarpro.Song) -> str:
     """Pull a 4-digit year out of GP metadata.
 
     GP files have no dedicated year field; the year usually appears inside the
-    copyright string (e.g. "1998 Goat Head Music, WB Music Corp, USA"). RsCli
-    requires <albumYear> to parse as Int32, so we extract just the digits and
-    fall back to empty (which RsCli treats as no year) when nothing matches.
+    copyright string (e.g. "1998 Goat Head Music, WB Music Corp, USA"). Downstream
+    consumers require <albumYear> to parse as Int32, so we extract just the digits
+    and fall back to empty when nothing matches.
     """
     for field_val in (getattr(song, "copyright", None), getattr(song, "subtitle", None)):
         if not field_val:

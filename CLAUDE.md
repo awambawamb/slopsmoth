@@ -1,6 +1,6 @@
 # Slopsmith — AI Agent Guide
 
-Slopsmith is a self-hosted web app for browsing, playing, and practicing Rocksmith 2014 Custom DLC. It runs as a Docker container with a FastAPI backend (`server.py`), vanilla JavaScript frontend (`static/`), shared Python libraries (`lib/`), and an extensive plugin system (`plugins/`). There are no frontend frameworks — everything is plain JS, HTML, and Tailwind CSS.
+Slopsmith is a self-hosted web app for browsing, playing, and practicing interactive music notation from user-supplied `.sloppak` bundles and loose-folder songs. It runs as a Docker container with a FastAPI backend (`server.py`), vanilla JavaScript frontend (`static/`), shared Python libraries (`lib/`), and an extensive plugin system (`plugins/`). There are no frontend frameworks — everything is plain JS, HTML, and Tailwind CSS.
 
 ## Architecture Quick Reference
 
@@ -13,10 +13,9 @@ static/
   style.css            Custom CSS loaded alongside Tailwind
 lib/
   song.py              Core data models (Note, Chord, Arrangement, Song)
-  psarc.py             PSARC archive reading and extraction
   sloppak.py           Sloppak format support
   audio.py             WEM/OGG/MP3 audio handling
-  retune.py            Pitch-shifting logic
+  retune.py            Pitch-shifting (disabled for encrypted archives)
   tunings.py           Tuning name/offset utilities
   gp2rs.py             Guitar Pro to Rocksmith XML conversion
   gp2midi.py           Guitar Pro to MIDI
@@ -97,8 +96,7 @@ The fix is `context["load_sibling"](name)`, which loads the sibling under a name
 
 ```python
 def setup(app, context):
-    extractor = context["load_sibling"]("extractor")
-    PsarcReader = extractor.PsarcReader
+    MyHelper = context["load_sibling"]("my_helper")
     # …
 ```
 
@@ -418,10 +416,7 @@ window.registerShortcut({
 
 ## Song Formats
 
-Slopsmith supports two song formats:
-
-### PSARC (Rocksmith native)
-The original Rocksmith 2014 archive format. Contains encrypted SNG note data, WEM audio, album art, and tone presets. Read-only — Slopsmith does fast metadata scanning in-memory via `lib/psarc.py` (`read_psarc_entries`) without fully unpacking the archive, but playback and conversion paths extract the PSARC to a temporary directory via `unpack_psarc()` before loading note/audio assets. Audio is decoded via `vgmstream-cli` + `ffmpeg`.
+Slopsmith supports user-supplied open formats only. Encrypted third-party game archives are not supported.
 
 ### Sloppak (open format)
 An open, hand-editable song package designed for Slopsmith. Exists in two interchangeable forms:
@@ -447,13 +442,13 @@ cover.jpg              Album art (optional)
 lyrics.json            Syllable-level lyrics (optional)
 ```
 
-Sloppak is the preferred format for new features. The [Sloppak Converter plugin](https://github.com/topkoa/slopsmith-plugin-sloppak-converter) converts PSARCs to sloppak, and the [Stems plugin](https://github.com/topkoa/slopsmith-plugin-stems) provides live stem mixing for sloppak songs.
+Sloppak is the primary format. The [Stems plugin](https://github.com/topkoa/slopsmith-plugin-stems) provides live stem mixing for sloppak songs.
 
 **Full developer reference:** [docs/sloppak-spec.md](docs/sloppak-spec.md) — manifest schema, arrangement wire format, and how to extend the format with new data types (drum tab, key/scale annotations, etc.).
 
 **Key code:**
 - `lib/sloppak.py` — format detection, zip/directory resolution, metadata extraction, song loading
-- `lib/sloppak_convert.py` — PSARC to sloppak conversion pipeline, Demucs stem splitting
+- `lib/sloppak_convert.py` — Demucs stem splitting for `.sloppak` songs
 - `lib/song.py` — shared data models (`Note`, `Chord`, `Arrangement`, `Song`) and wire format serialization used by both formats
 
 ## Frontend Conventions

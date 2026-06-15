@@ -3,7 +3,7 @@
 # =============================================================================
 # build-proxmox-ct.sh  –  Build a Proxmox LXC rootfs from WSL2 (no lxc-start)
 #
-# Run this from your project root (where rscli/, server.py, etc. live).
+# Run this from your project root (where server.py, lib/, etc. live).
 #
 # Usage:
 #   sudo bash build-proxmox-ct.sh [TARGETARCH] [OUTPUT_NAME]
@@ -13,8 +13,7 @@
 #   sudo bash build-proxmox-ct.sh arm64 slopsmith-ct
 #
 # Environment variables:
-#   SONG_SRC_DIR        Path to the song source root, containing both
-#                       dlc/*_p.psarc and songs.psarc (default: /mnt/z/songs).
+#   SONG_SRC_DIR        Path to a directory of .sloppak files (default: /mnt/z/songs).
 #   SKIP_HASH_CHECK=1   Bypass SHA256 verification — for unpinned hashes OR
 #                       to override mismatches when an upstream artifact rolls
 #                       (e.g. dot.net/v1/dotnet-install.sh). Use with caution.
@@ -81,24 +80,11 @@ fi
 
 mkdir -p "$BUILD_BASE"
 
-DOTNET_CHANNEL="10.0"
 VGMSTREAM_URL="https://github.com/vgmstream/vgmstream/releases/download/r2083/vgmstream-linux-cli.zip"
-# Pin Rocksmith2014.NET to a specific commit so RsCli builds are reproducible.
-# Bump this when intentionally pulling upstream changes.
-RS2014_NET_REPO="https://github.com/iminashi/Rocksmith2014.NET.git"
-RS2014_NET_COMMIT="b87c9a3afd31c40ade9685a9244e718e7581c0cb"
-# Supply-chain hashes — regenerate with:
-#   curl -fsSL <URL> | sha256sum
-# Set SKIP_HASH_CHECK=1 to bypass verification (e.g. when Microsoft rolls
-# dotnet-install.sh and the pinned hash hasn't been refreshed yet).
 VGMSTREAM_SHA256="7fc17225b7a49b8f1e7850f6cc5bdaf73c35e81ee5774bb12211ebc85188a4ff"
-# dot.net/v1/dotnet-install.sh is a rolling URL; refresh this hash whenever
-# Microsoft updates the installer (the build will abort with a clear mismatch).
-DOTNET_INSTALL_SHA256="102a6849303713f15462bb28eb10593bf874bbeec17122e0522f10a3b57ce442"
 
 APP_DIR="/app"
 VENV_DIR="/opt/app-venv"
-RSCLI_DIR="/opt/rscli"
 DLC_DIR="/dlc"
 CONFIG_DIR="/config"
 SONG_ARCHIVE_DIR="/songs"
@@ -260,76 +246,7 @@ r "apt-get update -qq && apt-get install -y --no-install-recommends \
 ok "System packages installed."
 
 # =============================================================================
-# 3. Install .NET  (build-time only — RsCli is published with --self-contained,
-#    so the entire /usr/share/dotnet tree is removed after build to save ~700MB
-#    and shrink the runtime attack surface, mirroring the Dockerfile's slim
-#    final stage)
-# =============================================================================
-info "Installing .NET ${DOTNET_CHANNEL} SDK (build-only, removed after publish) …"
-r "curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh"
-verify_sha256 "${ROOTFS}/tmp/dotnet-install.sh" "${DOTNET_INSTALL_SHA256}" "dotnet-install.sh"
-r "chmod +x /tmp/dotnet-install.sh \
-    && DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 \
-       DOTNET_CLI_TELEMETRY_OPTOUT=1 \
-       /tmp/dotnet-install.sh --channel ${DOTNET_CHANNEL} \
-           --install-dir /usr/share/dotnet \
-    && ln -sf /usr/share/dotnet/dotnet /usr/local/bin/dotnet \
-    && rm /tmp/dotnet-install.sh"
-ok ".NET installed."
-
-# =============================================================================
-# 4. Build RsCli inside the rootfs
-# =============================================================================
-info "Cloning Rocksmith2014.NET @ ${RS2014_NET_COMMIT:0:12} (host-side) …"
-mkdir -p "${ROOTFS}/opt"  # /opt is FHS-required, but be explicit
-rm -rf "${ROOTFS}/opt/rs2014"
-git clone --no-checkout --filter=blob:none "${RS2014_NET_REPO}" "${ROOTFS}/opt/rs2014"
-git -C "${ROOTFS}/opt/rs2014" checkout --quiet "${RS2014_NET_COMMIT}"
- 
-info "Copying rscli sources …"
-[[ -f "${PROJECT_DIR}/rscli/RsCli.fsproj" ]] || die "rscli/RsCli.fsproj not found."
-[[ -f "${PROJECT_DIR}/rscli/Program.fs"   ]] || die "rscli/Program.fs not found."
-mkdir -p "${ROOTFS}/opt/rs2014/tools/RsCli"
-cp "${PROJECT_DIR}/rscli/RsCli.fsproj" "${ROOTFS}/opt/rs2014/tools/RsCli/"
-cp "${PROJECT_DIR}/rscli/Program.fs"   "${ROOTFS}/opt/rs2014/tools/RsCli/"
- 
-# NuGetAudit=false: Rocksmith2014.NET pins older NuGet dependencies that
-# trigger audit warnings.  We don't ship the SDK in the final image — only
-# the self-contained publish output — so these warnings are noise during a
-# build-time-only step.  Re-enable if you upgrade the upstream project.
-info "Patching Directory.Build.props (host-side) …"
-PROPS=$(find "${ROOTFS}/opt/rs2014" -name "Directory.Build.props" | head -1)
-if [[ -z "$PROPS" ]]; then
-  warn "Directory.Build.props not found – skipping NuGetAudit patch"
-else
-  info "  Patching: ${PROPS#"$ROOTFS"}"
-  sed -i 's|</PropertyGroup>|<NuGetAudit>false</NuGetAudit></PropertyGroup>|' "$PROPS"
-fi
- 
-# Compute the path as seen inside the container (strip the host rootfs prefix)
-FSPROJ_HOST=$(find "${ROOTFS}/opt/rs2014/tools/RsCli" -name "*.fsproj" 2>/dev/null | head -1)
-[[ -n "$FSPROJ_HOST" ]] || die "RsCli.fsproj not found under ${ROOTFS}/opt/rs2014/tools/RsCli"
-FSPROJ_INNER="${FSPROJ_HOST#"$ROOTFS"}"
-FSPROJ_DIR_INNER="$(dirname "$FSPROJ_INNER")"
-info "  Building project at (container path): ${FSPROJ_DIR_INNER}"
- 
-r "export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 \
-    && export DOTNET_CLI_TELEMETRY_OPTOUT=1 \
-    && cd '${FSPROJ_DIR_INNER}' \
-    && dotnet publish -c Release -r '${RID}' --self-contained -o '${RSCLI_DIR}'"
- 
-# Clean up build artifacts to keep the image lean. RsCli is self-contained
-# (its publish output bundles its own .NET runtime under ${RSCLI_DIR}), so
-# the system-wide /usr/share/dotnet tree is build-only and gets dropped.
-rm -rf "${ROOTFS}/opt/rs2014" \
-       "${ROOTFS}/root/.nuget" \
-       "${ROOTFS}/root/.dotnet" \
-       "${ROOTFS}/usr/share/dotnet" \
-       "${ROOTFS}/usr/local/bin/dotnet"
-ok "RsCli built → ${RSCLI_DIR}"
-
-# =============================================================================
-# 5. vgmstream-cli
+# 3. vgmstream-cli
 # =============================================================================
 info "Installing vgmstream-cli …"
 r "curl -fSL '${VGMSTREAM_URL}' -o /tmp/vgm.zip"
@@ -394,18 +311,11 @@ else
   warn "  config/ not found."
 fi
 
-if compgen -G "${SONG_SRC_DIR}/dlc/*_p.psarc" &>/dev/null; then
-  cp "${SONG_SRC_DIR}"/dlc/*_p.psarc "${ROOTFS}${DLC_DIR}/"
-  info "  Copied DLC psarc files."
+if compgen -G "${SONG_SRC_DIR}/*.sloppak" &>/dev/null; then
+  cp "${SONG_SRC_DIR}"/*.sloppak "${ROOTFS}${DLC_DIR}/"
+  info "  Copied .sloppak files."
 else
-  warn "  No *_p.psarc files found – copy them into ${DLC_DIR} on Proxmox."
-fi
-
-if [[ -f "${SONG_SRC_DIR}/songs.psarc" ]]; then
-  cp "${SONG_SRC_DIR}/songs.psarc" "${ROOTFS}${SONG_ARCHIVE_DIR}/"
-  info "  Copied songs.psarc"
-else
-  warn "  songs.psarc not found."
+  warn "  No .sloppak files found – copy songs into ${DLC_DIR} on Proxmox."
 fi
 
 # =============================================================================
@@ -415,8 +325,6 @@ info "Writing /etc/environment …"
 cat > "${ROOTFS}/etc/environment" <<EOF
 PATH=${VENV_DIR}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 PYTHONPATH=${APP_DIR}/lib:${APP_DIR}
-RSCLI_PATH=${RSCLI_DIR}/RsCli
-DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
 DLC_DIR=${DLC_DIR}
 CONFIG_DIR=${CONFIG_DIR}
 EOF
@@ -516,8 +424,7 @@ SVC_GID="$(r "id -g ${SVC_USER}")"
 chown -hR "${SVC_UID}:${SVC_GID}" \
               "${ROOTFS}${APP_DIR}" "${ROOTFS}${CONFIG_DIR}" \
               "${ROOTFS}${DLC_DIR}" "${ROOTFS}${VENV_DIR}"
-chown -hR 0:0 "${ROOTFS}${RSCLI_DIR}" \
-              "${ROOTFS}${SONG_ARCHIVE_DIR}"
+chown -hR 0:0 "${ROOTFS}${SONG_ARCHIVE_DIR}"
 
 # (e) Fix resolv.conf to use the systemd-resolved stub. MUST run after the
 # last r() invocation: r() bind-mounts the host /etc/resolv.conf onto the

@@ -1,34 +1,3 @@
-# ── Stage 1: Build RsCli ─────────────────────────────────────────────────
-# TARGETARCH matches the final image (arm64 on Apple Silicon, amd64 on Intel/x86 servers).
-# RsCli must match that arch: linux-x64 binaries do not run on linux/arm64.
-FROM python:3.12-slim AS builder
-ARG TARGETARCH
-
-RUN apt-get update && apt-get install -y --no-install-recommends curl git && rm -rf /var/lib/apt/lists/*
-
-RUN curl -sL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
-    && chmod +x /tmp/dotnet-install.sh \
-    && /tmp/dotnet-install.sh --channel 10.0 --install-dir /usr/share/dotnet \
-    && ln -s /usr/share/dotnet/dotnet /usr/local/bin/dotnet
-
-ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
-ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
-
-RUN git clone --depth 1 https://github.com/iminashi/Rocksmith2014.NET.git /tmp/rs2014
-
-COPY rscli/RsCli.fsproj /tmp/rs2014/tools/RsCli/
-COPY rscli/Program.fs /tmp/rs2014/tools/RsCli/
-
-RUN sed -i 's|</PropertyGroup>|<NuGetAudit>false</NuGetAudit></PropertyGroup>|' /tmp/rs2014/Directory.Build.props \
-    && cd /tmp/rs2014/tools/RsCli \
-    && arch="${TARGETARCH:-$(dpkg --print-architecture)}" \
-    && case "$arch" in \
-         arm64|aarch64) RID=linux-arm64 ;; \
-         amd64|x86_64) RID=linux-x64 ;; \
-         *) echo "Unsupported build architecture: $arch" >&2; exit 1 ;; \
-       esac \
-    && dotnet publish -c Release -r "$RID" --self-contained -o /opt/rscli
-
 # ── Stage 1b: Build native vgmstream-cli for target arch ─────────────────────
 FROM python:3.12-slim AS vgmstream-builder
 ARG VGMSTREAM_REF=r2083
@@ -173,9 +142,6 @@ LABEL org.slopsmith.ffmpeg.release="${FFMPEG_RELEASE}" \
 COPY --from=vgmstream-builder /out/vgmstream-cli /usr/local/bin/vgmstream-cli
 RUN chmod +x /usr/local/bin/vgmstream-cli
 
-# Copy RsCli from builder (no .NET SDK in final image)
-COPY --from=builder /opt/rscli /opt/rscli
-
 WORKDIR /app
 
 # Upgrade pip itself before installing requirements — clears the pip CVEs
@@ -195,8 +161,6 @@ COPY main.py /app/
 COPY VERSION /app/
 
 ENV PYTHONPATH=/app/lib:/app
-ENV RSCLI_PATH=/opt/rscli/RsCli
-ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
 
 EXPOSE 8000
 

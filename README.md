@@ -62,13 +62,11 @@ A real-time note highway that renders arrangements as scrolling, fret-positioned
 - **Create from Guitar Pro Tab** — search Ultimate Guitar for GP3/GP4/GP5 tabs and convert them to playable songs with MIDI audio (available as a plugin)
 
 ### Compatibility
-- Supports both **custom songs** and **official song packs**
-- Official packs: automatically converts binary note files (SNG) to XML via the built-in note compiler
-- Reads arrangement names from manifest JSON (accurate Lead/Rhythm/Bass identification)
+- Supports **user-supplied open formats**: `.sloppak` bundles and loose-folder songs (XML + WEM/OGG)
+- Encrypted third-party game archives (e.g. Rocksmith PSARC) are **not supported**
 
 ### Scalability
-- **In-memory PSARC scanning** — reads metadata without writing to disk
-- **Parallel scanning** — 8-thread metadata extraction
+- **Parallel scanning** — 8-thread metadata extraction for sloppak and loose-folder libraries
 - **Server-side pagination and search** — SQLite-backed, handles 80,000+ songs
 - **Non-blocking scan** — browse already-scanned songs while import continues in background
 
@@ -193,7 +191,7 @@ sudo systemctl restart apache2
 
 ## Proxmox LXC Container
 
-`build-proxmox-ct.sh` builds a self-contained Proxmox LXC rootfs tarball from WSL2. It bootstraps a Debian Trixie rootfs, installs the runtime dependencies (Python, FFmpeg, fluidsynth, vgmstream) plus a build-only .NET SDK, builds RsCli, copies the app, removes the .NET SDK, and packages the result as a `.tar.zst` importable by `pct restore`.
+`build-proxmox-ct.sh` builds a self-contained Proxmox LXC rootfs tarball from WSL2. It bootstraps a Debian Trixie rootfs, installs the runtime dependencies (Python, FFmpeg, fluidsynth, vgmstream), copies the app, and packages the result as a `.tar.zst` importable by `pct restore`.
 
 ```bash
 # Prerequisites (WSL2):
@@ -209,9 +207,9 @@ pct restore 200 /var/lib/vz/template/cache/slopsmith-ct.tar.zst \
     --net0 name=eth0,bridge=vmbr0,ip=dhcp --unprivileged 1 --start 1
 ```
 
-Override the song source directory (the directory that contains both `dlc/` and `songs.psarc`) via environment, using `sudo env` so the variable survives `sudo`: `sudo env SONG_SRC_DIR=/path/to/your/songs bash build-proxmox-ct.sh amd64 slopsmith-ct`.
+Override the song source directory via environment, using `sudo env` so the variable survives `sudo`: `sudo env SONG_SRC_DIR=/path/to/your/songs bash build-proxmox-ct.sh amd64 slopsmith-ct`.
 
-The build copies `*_p.psarc` files from `${SONG_SRC_DIR}/dlc/` and `songs.psarc` from `${SONG_SRC_DIR}/` — point the variable at the source root, not at the `dlc/` folder. .NET is installed only as a build dependency; RsCli is published with `--self-contained`, so the system-wide .NET tree is removed before the rootfs is packaged (the runtime ships bundled inside `RsCli`).
+The build optionally copies `.sloppak` files from `${SONG_SRC_DIR}/` into the container's DLC folder.
 
 The build verifies downloaded files (vgmstream, dotnet-install.sh) against pinned SHA256 hashes. Set `SKIP_HASH_CHECK=1` to bypass verification — useful when an upstream artifact (e.g. `dot.net/v1/dotnet-install.sh`) rolls and the pinned hash hasn't been refreshed yet:
 
@@ -386,10 +384,8 @@ Routes are registered under `/api/plugins/{plugin_id}/` to avoid conflicts.
 | [Tab View](https://github.com/byrongamatos/slopsmith-plugin-tabview)                | Scrolling guitar tablature notation via alphaTab | `git clone ...slopsmith-plugin-tabview.git tab_view`                    |
 | [MIDI Amp Control](https://github.com/byrongamatos/slopsmith-plugin-midi)           | Auto-switch amp/modeler presets via MIDI on tone changes | `git clone ...slopsmith-plugin-midi.git midi_amp`                       |
 | [Section Map](https://github.com/byrongamatos/slopsmith-plugin-sectionmap)          | Color-coded song structure minimap with clickable navigation | `git clone ...slopsmith-plugin-sectionmap.git section_map`              |
-| [RS1 Extractor](https://github.com/byrongamatos/slopsmith-plugin-rs1extract)        | Extract RS1 compatibility songs into individual song files | `git clone ...slopsmith-plugin-rs1extract.git rs1_extract`              |
-| [Base Game Extractor](https://github.com/byrongamatos/slopsmith-plugin-discextract) | Extract on-disc base game songs from songs.psarc into individual song files | `git clone ...slopsmith-plugin-discextract.git disc_extract`            |
+| [Sloppak Converter](https://github.com/topkoa/slopsmith-plugin-sloppak-converter)   | Demucs stem splitting for `.sloppak` songs — bulk-select cards, with a Conversions queue dashboard (pause/resume, retry, per-job metadata + Demucs result summary) | `git clone ...slopsmith-plugin-sloppak-converter.git sloppak_converter` |
 | [Arrangement Editor](https://github.com/byrongamatos/slopsmith-plugin-editor)       | DAW-like visual editor for creating and editing song note charts | `git clone ...slopsmith-plugin-editor.git editor`                       |
-| [Profile Import](https://github.com/byrongamatos/slopsmith-plugin-profileimport)    | Import play counts, favorites, and scores from game profiles | `git clone ...slopsmith-plugin-profileimport.git profileimport`         |
 | [MIDI Capo](https://github.com/masc0t/slopsmith-plugin-midi-capo)                   | MIDI capo control for real-time transposition | `git clone ...slopsmith-plugin-midi-capo.git midi_capo`                 |
 | [Note Detection](https://github.com/byrongamatos/slopsmith-plugin-notedetect)       | Real-time pitch detection and scoring against highway notes | `git clone ...slopsmith-plugin-notedetect.git note_detect`              |
 | [Find More](https://github.com/masc0t/slopsmith-plugin-find-more)              | Search for more songs by the same artist | `git clone ...slopsmith-plugin-find-more.git find_more`                 |
@@ -397,7 +393,6 @@ Routes are registered under `/api/plugins/{plugin_id}/` to avoid conflicts.
 | [Studio](https://github.com/byrongamatos/slopsmith-plugin-studio)                   | Collaborative band recording and multi-track mixing | `git clone ...slopsmith-plugin-studio.git studio`                       |
 | [Drum Highway](https://github.com/byrongamatos/slopsmith-plugin-drums)              | Lane-based drum highway with MIDI drum pad input and built-in sounds | `git clone ...slopsmith-plugin-drums.git drums`                         |
 | [Split Screen](https://github.com/topkoa/slopsmith-plugin-splitscreen)              | 2-4 highway panels side-by-side for multi-arrangement practice | `git clone ...slopsmith-plugin-splitscreen.git splitscreen`             |
-| [Sloppak Converter](https://github.com/topkoa/slopsmith-plugin-sloppak-converter)   | Convert PSARC to .sloppak with Demucs stem splitting — bulk-select cards or one-click "convert all PSARCs missing a sloppak", with a Conversions queue dashboard (pause/resume, retry, per-job metadata + Demucs result summary) | `git clone ...slopsmith-plugin-sloppak-converter.git sloppak_converter` |
 | [Stems Mixer](https://github.com/topkoa/slopsmith-plugin-stems)                     | Per-stem mute/volume controls for .sloppak songs | `git clone ...slopsmith-plugin-stems.git stems`                         |
 | [Invert Highway](https://github.com/masc0t/slopsmith-plugin-invert-highway)         | Flip the highway note direction | `git clone ...slopsmith-plugin-invert-highway.git invert_highway`       |
 | [Jumping Tab](https://github.com/renanboni/slopsmith-plugin-jumpingtab)             | Yousician-style 2D horizontal tab with trajectory arcs and hopping ball | `git clone ...slopsmith-plugin-jumpingtab.git jumpingtab`               |
@@ -437,8 +432,8 @@ This repo includes a [`CLAUDE.md`](CLAUDE.md) file with architecture overview, p
 
 - **Backend**: Python / FastAPI / SQLite / WebSocket
 - **Frontend**: Vanilla JS / Canvas 2D / Tailwind CSS (CDN)
-- **PSARC**: Custom AES-CFB-128 decryptor with in-memory reading
-- **Note Compiler**: F# CLI tool wrapping a third-party MIT-licensed .NET library (see [`rscli/LICENSE`](rscli/LICENSE))
+- **Sloppak**: Open zip-or-directory format with YAML manifest, JSON arrangements, and OGG stems
+- **Loose folder**: CDLC-style flat directories with arrangement XML and WEM audio
 - **Audio**: vgmstream (WEM decode) / FFmpeg / FluidSynth (MIDI render) / rubberband (pitch shift)
 - **Docker**: Self-contained image with all dependencies
 
@@ -491,4 +486,4 @@ Slopsmith is licensed under the [GNU Affero General Public License v3.0](LICENSE
 
 You are free to use, modify, and redistribute Slopsmith — including running it on your own server. If you distribute modified versions, or run a modified version that interacts with users over a network, you must make the corresponding source code available under the same license. See [CONTRIBUTING.md](CONTRIBUTING.md) for contributor terms (DCO sign-off, plugin licensing policy).
 
-Bundled and vendored third-party code retains its original license — see [`rscli/LICENSE`](rscli/LICENSE) for the F# wrapper's dependencies, and individual plugin repositories for plugin licenses.
+Bundled and vendored third-party code retains its original license — see individual plugin repositories for plugin licenses.

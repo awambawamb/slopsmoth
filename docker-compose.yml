@@ -4,8 +4,8 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      # Mount your Rocksmith DLC folder (adjust path for your system)
-      - ${DLC_PATH:-~/.local/share/Steam/steamapps/common/Rocksmith2014/dlc}:/dlc
+      # Mount your song library folder (adjust path for your system)
+      - ${DLC_PATH:-~/Music/Slopsmith}:/dlc
       # Persistent config and cache
       - rocksmith-config:/config
       # Mount source for live reload during development
@@ -22,8 +22,6 @@ services:
       - PYTHONPATH=/app/lib:/app
       - DLC_DIR=/dlc
       - CONFIG_DIR=/config
-      - RSCLI_PATH=/opt/rscli/RsCli
-      - DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
       # Logging (optional)
       # - LOG_LEVEL=DEBUG       # DEBUG | INFO | WARNING | ERROR  (default: INFO)
       # - LOG_FORMAT=json       # json | text  (default: text — coloured console)

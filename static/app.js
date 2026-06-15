@@ -2353,8 +2353,6 @@ async function loadSettings() {
     // module variable all pick it up consistently. Pass skipPersist
     // so we don't echo the loaded value back to the server.
     setAvOffsetMs(Number(data.av_offset_ms) || 0, /* skipPersist */ true);
-    const psarcPlatformEl = document.getElementById('psarc-platform');
-    if (psarcPlatformEl) psarcPlatformEl.value = data.psarc_platform || 'both';
     // Native folder picker — only present when running inside slopsmith-desktop.
     if (window.slopsmithDesktop && typeof window.slopsmithDesktop.pickDirectory === 'function') {
         document.getElementById('btn-pick-dlc')?.classList.remove('hidden');
@@ -2760,7 +2758,7 @@ async function saveSettings() {
             default_arrangement: document.getElementById('default-arrangement').value,
             demucs_server_url: document.getElementById('demucs-server-url').value.trim(),
             av_offset_ms: _avOffsetMs,
-            psarc_platform: document.getElementById('psarc-platform')?.value || 'both',
+            // psarc_platform setting removed from UI; omit from export payload
         }),
     });
     const data = await resp.json();
@@ -3235,10 +3233,10 @@ async function uploadSongs(fileList) {
     const files = [];
     for (const f of all) {
         const lower = f.name.toLowerCase();
-        if (lower.endsWith('.psarc') || lower.endsWith('.sloppak')) {
+        if (lower.endsWith('.sloppak')) {
             files.push(f);
         } else {
-            failures.push(`${f.name}: only .psarc or .sloppak accepted`);
+            failures.push(`${f.name}: only .sloppak accepted`);
         }
     }
     if (files.length === 0) {
