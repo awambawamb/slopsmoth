@@ -1,4 +1,6 @@
-# Slopsmith
+# Slopsmoth
+
+Because fuck yes
 
 A self-contained web application for browsing, playing, and practicing interactive music notation for a full band — guitar, bass, keys, drums, and vocals — extended by a large plugin system. Runs entirely in Docker — no local dependencies required.
 
